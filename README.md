@@ -1,4 +1,4 @@
-# UniverseEventSource
+# EventBus
 > Simple event source system<br /><br />
 
 This project lets you publish and subscribe events easily.
