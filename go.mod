@@ -1,4 +1,4 @@
-module github.com/Shibbaz/GOEventBus
+module github.com/Raezil/GOEventBus
 
 go 1.22.2
 
