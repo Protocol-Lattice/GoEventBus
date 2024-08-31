@@ -5,7 +5,7 @@ This project lets you publish and subscribe events easily.
 
 To download:
 ```
-go get github.com/Shibbaz/GOEventBus
+go get github.com/Raezil/GoEventBus
 ```
 
 # Quick Start
