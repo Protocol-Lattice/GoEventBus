@@ -24,7 +24,7 @@ package main
 import (
 	"fmt"
 
-	gbus "github.com/Shibbaz/GOEventBus"
+	gbus "github.com/Raezil/GoEventBus"
 )
 
 // the message entity to be dispatched
