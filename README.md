@@ -1,4 +1,7 @@
-# EventBus
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/021ebc5a-5d41-49ab-a281-129782bc4a5a">
+</p>
+<h1 align="center">EventBus lib in Golang!</h1>
 > Simple event source system<br /><br />
 
 This project lets you publish and subscribe events easily.
