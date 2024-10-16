@@ -21,32 +21,55 @@ go mod init demo
 ```
 
 2. Add `main.go`
-```go
+```
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 
 	gbus "github.com/Raezil/GoEventBus"
+	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
 )
 
-// the message entity to be dispatched
+// The message entity to be dispatched
 type HouseWasSold struct{}
 
 func main() {
 	dispatcher := &gbus.Dispatcher{
-		"main.HouseWasSold": func(m map[string]any) {
-			fmt.Printf("dispatch: %v\n",m)
+		"main.HouseWasSold": func(m *map[string]any) (map[string]interface{}, error) {
+			fmt.Println(*m)
+			return *m, nil
 		},
 	}
 	eventstore := gbus.NewEventStore(dispatcher)
-	eventstore.Publish(gbus.NewEvent(
-				HouseWasSold{},
-				map[string]any{
-					"price": 1 * 100,
-				},
-			))
-	eventstore.Run()
+
+	connStr := "postgres://postgres:postgres@localhost:5432/eventstore?sslmode=disable"
+	gbus.SetEventStoreDB(connStr)
+
+	router := mux.NewRouter()
+	router.HandleFunc("/house-sold", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		eventstore.Publish(gbus.NewEvent(
+			HouseWasSold{},
+			map[string]any{
+				"Price": 100,
+			},
+		))
+		eventstore.Run()
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]string{"status": "House sold event published"}
+		json.NewEncoder(w).Encode(response)
+	})
+	serverAddress := ":8080"
+	log.Printf("Server is listening on %s", serverAddress)
+	if err := http.ListenAndServe(serverAddress, router); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }
 ```
 
