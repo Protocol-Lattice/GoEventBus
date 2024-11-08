@@ -1,4 +1,4 @@
-package GOEventBus
+package GoEventBus
 
 import (
 	"fmt"
@@ -10,10 +10,12 @@ type HouseWasSold struct{}
 
 func TestNewEventStore(t *testing.T) {
 	dispatcher := Dispatcher{
-		"tests.HouseWasSold": func(m *map[string]any) (map[string]any, error) {
+		"tests.HouseWasSold": func(m map[string]any) (Result, error) {
 			fmt.Println(m)
 
-			return *m, nil
+			return Result{
+				Message: "Hello",
+			}, nil
 		},
 	}
 	got := &EventStore{Dispatcher: &dispatcher}
@@ -36,10 +38,12 @@ func TestNewEvent(t *testing.T) {
 
 func TestEventStorePublish(t *testing.T) {
 	dispatcher := Dispatcher{
-		"tests.HouseWasSold": func(m *map[string]any) (map[string]any, error) {
+		"tests.HouseWasSold": func(m map[string]any) (Result, error) {
 			fmt.Println(m)
 
-			return *m, nil
+			return Result{
+				Message: m["price"].(string),
+			}, nil
 		},
 	}
 	eventstore := NewEventStore(&dispatcher)
@@ -47,8 +51,8 @@ func TestEventStorePublish(t *testing.T) {
 		"price": 100,
 	}
 	wanted := NewEvent(HouseWasSold{}, args)
-	eventstore.Publish(wanted)
-	got, valid := eventstore.GetEvent().(Event)
+	eventstore.Publish(*wanted)
+	got, valid := eventstore.Events.Get().(Event)
 	if valid != true {
 		t.Errorf("Event was not published, got %v, expected %v", got, wanted)
 
