@@ -1,142 +1,87 @@
-package GOEventBus
+package GoEventBus
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"sync"
-
-	"github.com/pion/webrtc/v2"
 )
 
-type EventStoreListener struct {
-	OnDescription chan string
-	OnBye         chan bool
-}
-type EventStoreNode struct {
-	connection *webrtc.PeerConnection
-	dispatcher Dispatcher
-	Listner    EventStoreListener
-	DC         webrtc.DataChannel
-}
-
+// EventStore handles publishing and dispatching events
 type EventStore struct {
+	Mutex      sync.Mutex
 	Dispatcher *Dispatcher
-	Done       chan bool
-	events     sync.Pool
-	Wg         sync.WaitGroup
-	left       EventStoreNode
-	right      EventStoreNode
-	mutex      sync.Mutex
+	Events     *sync.Pool
 }
 
-var EventStoreDB *sql.DB
-
-// Setting database connection
-func SetEventStoreDB(psqlInfo string) {
-	var err error
-	EventStoreDB, err = sql.Open("postgres", psqlInfo)
-	if err != nil {
-		panic(err)
-	}
-}
-
-// Eventstore constructor
+// NewEventStore initializes an EventStore with a dispatcher and an event pool
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
-	left := NewEventStoreNode(*dispatcher)
-	right := NewEventStoreNode(*dispatcher)
 	return &EventStore{
-		left:       *left,
-		right:      *right,
 		Dispatcher: dispatcher,
-		mutex:      sync.Mutex{},
-		events: sync.Pool{
+		Events: &sync.Pool{
 			New: func() interface{} {
-				return nil
+				return &Event{} // Return a new, non-nil Event instance
 			},
 		},
 	}
 }
 
-// querying database for events of projections'
-func (eventstore *EventStore) Query(projection string) map[string](map[string]any) {
-	rows, err := EventStoreDB.Query("SELECT event_id, metadata FROM events where projection = %s;", projection)
+// Publish adds an event to the event pool
+func (eventstore *EventStore) Publish(event *Event) {
+	eventstore.Events.Put(event)
+}
+
+// Commit retrieves and processes an event from the pool
+func (eventstore *EventStore) Commit() error {
+	curr := eventstore.Events.Get()
+	if curr == nil {
+		return fmt.Errorf("no events to process")
+	}
+
+	event, ok := curr.(*Event)
+	if !ok || event == nil {
+		return fmt.Errorf("invalid event type")
+	}
+
+	if eventstore.Dispatcher == nil {
+		return fmt.Errorf("dispatcher is nil")
+	}
+
+	// Check if the dispatcher has a handler for this event
+	handler, exists := (*eventstore.Dispatcher)[event.Projection]
+	if !exists {
+		return fmt.Errorf("no handler for event projection: %s", event.Projection)
+	}
+
+	// Execute the handler
+	_, err := handler(event.Args)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("error handling event: %w", err)
 	}
-	defer rows.Close()
-	data := map[string](map[string]any){}
-	for rows.Next() {
-		var metadata []byte
-		var event_id string
-		if err := rows.Scan(&metadata); err != nil {
-			log.Fatal(err)
-		}
-		if err := rows.Scan(&event_id); err != nil {
-			log.Fatal(err)
-		}
-		data[event_id] = NewSerializer().Deserialize(metadata)
 
-	}
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
-	return data
+	log.Printf("Event id: %s was successfully published", event.Id)
+
+	return nil
 }
 
-// Setting up database and creating table
-func (eventstore *EventStore) Setup(dbname string) {
-	_, err := EventStoreDB.Exec("create database " + dbname)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = EventStoreDB.Exec("CREATE TABLE IF NOT EXISTS events(event_id text primary key, projection text, metadata bytea)")
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-}
-
-// Get event from sync.Pool
-func (eventstore *EventStore) GetEvent() any {
-	return eventstore.events.Get()
-}
-
-// Subscribing event
-func (eventstore *EventStore) Publish(event Event) {
-	eventstore.events.Put(event)
-}
-
-// Broadcasts every published event
+// Broadcast locks the store and processes each event in the pool
 func (eventstore *EventStore) Broadcast() error {
-	eventstore.mutex.Lock()
-	defer eventstore.mutex.Unlock()
+	eventstore.Mutex.Lock()
+	defer eventstore.Mutex.Unlock()
+
+	var lastErr error
+	// Try to commit an event
 	for {
-		curr := eventstore.events.Get()
-		if curr == nil {
-			return fmt.Errorf("waiting for new events...")
+		err := eventstore.Commit()
+		if err != nil {
+			// If there are no more events to process, break the loop
+			if err.Error() != "" {
+				break
+			}
+			// Capture the last error if something else goes wrong
+			lastErr = err
 		}
-		eventstore.left.Subscribe(curr.(Event))
-		event := <-eventstore.left.Listner.OnDescription
-		eventstore.right.Publish(event)
-		event2 := <-eventstore.right.Listner.OnDescription
-		eventstore.left.Publish(event2)
+
 	}
-}
 
-func (eventstore *EventStore) Run() {
-	var mutex = sync.Mutex{}
-
-datasource:
-
-	mutex.Lock()
-	err := eventstore.Broadcast()
-	if err != nil {
-		return
-	}
-	mutex.Unlock()
-	goto datasource
-
+	return lastErr
 }
