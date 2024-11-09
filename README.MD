@@ -21,6 +21,7 @@ go mod init demo
 ```
 
 2. Add `main.go`
+# Example 1.
 ```
 package main
 
@@ -92,6 +93,7 @@ func main() {
 }
 ```
 
+# Example 2.
 ```
 package main
 
