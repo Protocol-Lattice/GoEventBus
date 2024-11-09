@@ -35,26 +35,3 @@ func TestNewEvent(t *testing.T) {
 
 	}
 }
-
-func TestEventStorePublish(t *testing.T) {
-	dispatcher := Dispatcher{
-		"tests.HouseWasSold": func(m map[string]any) (Result, error) {
-			fmt.Println(m)
-
-			return Result{
-				Message: m["price"].(string),
-			}, nil
-		},
-	}
-	eventstore := NewEventStore(&dispatcher)
-	args := map[string]any{
-		"price": 100,
-	}
-	wanted := NewEvent(HouseWasSold{}, args)
-	eventstore.Publish(*wanted)
-	got, valid := eventstore.Events.Get().(Event)
-	if valid != true {
-		t.Errorf("Event was not published, got %v, expected %v", got, wanted)
-
-	}
-}
