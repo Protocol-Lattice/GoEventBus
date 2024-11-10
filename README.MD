@@ -158,11 +158,3 @@ go get github.com/Shibbaz/GOEventBus@v0.1.6.2
 ```sh
 go run ./
 ```
-
-Output:
-```sh
-2024/04/14 16:40:04 Event id of 6da96821-b27a-4db4-8f5f-e7a1e189b813 was published from channel 'd7a3c677-f328-4f76-addc-d11d64cde566'
-2024/04/14 16:40:04 Channel a2cb010f-af65-4030-9e1e-44cdbd9baa5a was opened
-dispatch: map[price:100]
-...
-```
