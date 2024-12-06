@@ -148,6 +148,51 @@ func main() {
 
 }
 ```
+Example 3 
+```
+package main
+
+import (
+	. "github.com/Raezil/GoEventBus"
+	"fmt"
+	"log"
+)
+
+type HouseWasSoldEvent struct{}
+
+// NewDispatcher initializes the dispatcher with event handlers
+func NewDispatcher() *Dispatcher {
+	return &Dispatcher{
+		HouseWasSoldEvent{}: func(m map[string]interface{}) (Result, error) {
+			price, ok := m["price"].(int)
+			if !ok {
+				return Result{}, fmt.Errorf("price not provided or invalid")
+			}
+			result := fmt.Sprintf("House was sold for %d", price)
+			log.Println(result)
+			return Result{
+				Message: result,
+			}, nil
+		},
+	}
+}
+
+func main() {
+	// Initialize dispatcher and event store
+	dispatcher := NewDispatcher()
+	eventstore := NewEventStoreWithRabbitMq(dispatcher)
+	eventstore.PublishToRabbitMQ(NewEvent(
+		HouseWasSoldEvent{},
+		map[string]interface{}{
+			"price": 100,
+		},
+	))
+	// Broadcast the event
+	eventstore.BroadcastWithRabbitMq()
+
+}
+
+```
 
 3. Get the dependency
 ```sh
