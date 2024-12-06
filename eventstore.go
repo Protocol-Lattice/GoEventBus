@@ -16,6 +16,7 @@ type EventStore struct {
 // NewEventStore initializes an EventStore with a dispatcher and an event pool
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
 	return &EventStore{
+		Mutex:      sync.Mutex{},
 		Dispatcher: dispatcher,
 		Events: &sync.Pool{
 			New: func() interface{} {
