@@ -148,10 +148,9 @@ func main() {
 
 }
 ```
-
 3. Get the dependency
 ```sh
-go get github.com/Shibbaz/GOEventBus@v0.1.6.2
+go get github.com/Raezil/GoEventBus
 ``` 
 
 4. Run the project

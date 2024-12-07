@@ -28,6 +28,10 @@ func NewEventStore(dispatcher *Dispatcher) *EventStore {
 
 // Publish adds an event to the event pool
 func (eventstore *EventStore) Publish(event *Event) {
+	if event == nil {
+		log.Println("Attempted to publish a nil event")
+		return
+	}
 	eventstore.Events.Put(event)
 }
 
@@ -59,8 +63,7 @@ func (eventstore *EventStore) Commit() error {
 		return fmt.Errorf("error handling event: %w", err)
 	}
 
-	log.Printf("Event id: %s was successfully published", event.Id)
-
+	log.Printf("Event id: %s was successfully processed", event.Id)
 	return nil
 }
 
@@ -70,18 +73,15 @@ func (eventstore *EventStore) Broadcast() error {
 	defer eventstore.Mutex.Unlock()
 
 	var lastErr error
-	// Try to commit an event
 	for {
 		err := eventstore.Commit()
 		if err != nil {
-			// If there are no more events to process, break the loop
-			if err.Error() != "" {
+			if err.Error() == "no events to process" {
 				break
 			}
-			// Capture the last error if something else goes wrong
 			lastErr = err
+			log.Printf("Error processing event: %v", err)
 		}
-
 	}
 
 	return lastErr
