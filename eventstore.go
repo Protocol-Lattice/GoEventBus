@@ -142,33 +142,24 @@ func (eventstore *EventStore) PublishToRabbitMQ(event *Event) error {
 		return fmt.Errorf("cannot publish a nil event")
 	}
 
-	body := fmt.Sprintf("EventID: %v, Args: %v", event.Id, event.Args)
+	// Format the event data to publish
+	body := fmt.Sprintf("EventID: %s, Args: %v", event.Id, event.Args)
 	err := eventstore.Channel.Publish(
 		rabbitMQExchange, // exchange
 		"",               // routing key
 		false,            // mandatory
 		false,            // immediate
 		amqp.Publishing{
-			ContentType: "text/plain",
+			ContentType: "application/json",
 			Body:        []byte(body),
 		},
 	)
 	if err != nil {
-		log.Printf("Failed to publish a message: %v", err)
-		return err
+		return fmt.Errorf("failed to publish message to RabbitMQ: %w", err)
 	}
 
-	handler, exists := (*eventstore.Dispatcher)[event.Projection]
-	if !exists {
-		return fmt.Errorf("no handler for event projection: %s", event.Projection)
-	}
-
-	// Execute the handler
-	_, err = handler(event.Args)
-	if err != nil {
-		return fmt.Errorf("error handling event: %w", err)
-	}
-
+	// Log successful publishing
+	log.Printf("Successfully published event ID: %s to RabbitMQ", event.Id)
 	return nil
 }
 
@@ -183,16 +174,21 @@ func (eventstore *EventStore) CloseRabbitMQ() {
 }
 
 // BroadcastWithRabbitMq processes and publishes all events in the pool
-func (eventstore *EventStore) BroadcastWithRabbitMq() {
+func (eventstore *EventStore) BroadcastWithRabbitMQ() error {
 	eventstore.Mutex.Lock()
 	defer eventstore.Mutex.Unlock()
 
+	var lastErr error
+
 	for {
+		// Get an event from the pool
 		curr := eventstore.Events.Get()
 		if curr == nil {
+			// Exit if no more events are in the pool
 			break
 		}
 
+		// Type assert the event
 		event, ok := curr.(*Event)
 		if !ok || event == nil {
 			log.Println("Invalid event retrieved from pool")
@@ -200,8 +196,28 @@ func (eventstore *EventStore) BroadcastWithRabbitMq() {
 		}
 
 		// Publish the event to RabbitMQ
-		if err := eventstore.PublishToRabbitMQ(event); err != nil {
-			log.Printf("Failed to broadcast event %v: %v", event.Id, err)
+		err := eventstore.PublishToRabbitMQ(event)
+		if err != nil {
+			log.Printf("Failed to publish event ID %s: %v", event.Id, err)
+			lastErr = err // Record the last error encountered
+			continue
+		}
+
+		// Optionally, handle the event if there's a dispatcher
+		if eventstore.Dispatcher != nil {
+			handler, exists := (*eventstore.Dispatcher)[event.Projection]
+			if exists {
+				_, err := handler(event.Args)
+				if err != nil {
+					log.Printf("Error handling event ID %s: %v", event.Id, err)
+					lastErr = err
+				}
+			} else {
+				log.Printf("No handler found for event projection: %s", event.Projection)
+			}
 		}
 	}
+
+	// Return the last encountered error, if any
+	return lastErr
 }
