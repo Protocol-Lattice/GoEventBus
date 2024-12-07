@@ -148,6 +148,64 @@ func main() {
 
 }
 ```
+
+# Example 3
+run RabbitMQ
+```
+docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4.0-management
+```
+then run go run main.go
+```
+package main
+
+import (
+	"fmt"
+	"log"
+	. "github.com/Raezil/GoEventBus"
+)
+
+func NewDispatcher() *RabbitDispatcher {
+	return &RabbitDispatcher{
+		"HouseWasSold": func(m map[string]interface{}) (Result, error) {
+			price, ok := m["price"].(float64)
+			if !ok {
+				return Result{}, fmt.Errorf("price not provided or invalid")
+			}
+
+			result := fmt.Sprintf("House was sold for %.2f", price)
+			return Result{Message: result}, nil
+		},
+	}
+}
+
+func main() {
+	dispatcher := NewDispatcher()
+
+	rabbitStore, err := NewRabbitEventStore(dispatcher, "amqp://guest:guest@localhost:5672/", "events_queue")
+	if err != nil {
+		log.Fatalf("Failed to initialize RabbitEventStore: %v", err)
+	}
+
+	rabbitStore.Publish(&Event{
+		Id:         "12345",
+		Projection: "HouseWasSold",
+		Args: map[string]interface{}{
+			"price": 100.0,
+		},
+	})
+	rabbitStore.Publish(&Event{
+		Id:         "123456",
+		Projection: "HouseWasSold",
+		Args: map[string]interface{}{
+			"price": 200.0,
+		},
+	})
+
+	go rabbitStore.Broadcast()
+
+	select {}
+}
+```
 3. Get the dependency
 ```sh
 go get github.com/Raezil/GoEventBus
