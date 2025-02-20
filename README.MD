@@ -1,28 +1,37 @@
+# EventBus – A Lightweight Event Sourcing Library for Go
+
 <p align="center">
   <img src="https://github.com/user-attachments/assets/021ebc5a-5d41-49ab-a281-129782bc4a5a">
 </p>
-<h1 align="center">EventBus lib in Golang!</h1>
-> Simple event source system<br /><br />
 
-This project lets you publish and subscribe events easily.
+EventBus is a simple and efficient **event-driven system** for Go applications.  
+It allows you to **publish** and **subscribe** to events seamlessly.
 
-To download:
-```
+---
+
+## 📦 Installation
+
+To install the library, run:
+
+```sh
 go get github.com/Raezil/GoEventBus
 ```
 
-# Quick Start
-Let's make a pub/sub application:
-1. Create a project
+---
+
+## 🚀 Quick Start
+
+### 1️⃣ Initialize a New Project
+
 ```sh
-mkdir demo
-cd demo
-go mod init demo
+mkdir eventbus-demo
+cd eventbus-demo
+go mod init eventbus-demo
 ```
 
-2. Add `main.go`
-# Example 1.
-```
+### 2️⃣ Create `main.go`
+
+```go
 package main
 
 import (
@@ -32,74 +41,71 @@ import (
 	"net/http"
 
 	gbus "github.com/Raezil/GoEventBus"
-
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
 )
 
-// HouseWasSold represents an event for when a house has been sold
+// HouseWasSold represents an event for a house sale.
 type HouseWasSold struct{}
 
-// NewDispatcher initializes the dispatcher with event handlers
+// NewDispatcher sets up event handlers.
 func NewDispatcher() *gbus.Dispatcher {
 	return &gbus.Dispatcher{
-		HouseWasSold{}: func(m map[string]interface{}) (gbus.Result, error) {
-			price, ok := m["price"].(int) // Match the correct key "price"
+		HouseWasSold{}: func(data map[string]interface{}) (gbus.Result, error) {
+			price, ok := data["price"].(int)
 			if !ok {
-				return gbus.Result{}, fmt.Errorf("price not provided or invalid")
+				return gbus.Result{}, fmt.Errorf("invalid or missing 'price'")
 			}
-			result := fmt.Sprintf("House was sold for %d", price)
-			log.Println(result)
-			return gbus.Result{
-				Message: result,
-			}, nil
+			message := fmt.Sprintf("House sold for %d!", price)
+			log.Println(message)
+			return gbus.Result{Message: message}, nil
 		},
 	}
 }
 
 func main() {
-	// Initialize dispatcher and event store
 	dispatcher := NewDispatcher()
-	eventstore := gbus.NewEventStore(dispatcher)
+	eventStore := gbus.NewEventStore(dispatcher)
 
 	router := mux.NewRouter()
 	router.HandleFunc("/house-sold", func(w http.ResponseWriter, r *http.Request) {
-		// Publish the event with the correct key "price"
-		eventstore.Publish(gbus.NewEvent(
-			HouseWasSold{},
-			map[string]interface{}{
-				"price": 100,
-			},
-		))
-
-		// Broadcast the event after publishing, wait for completion
-		if err := eventstore.Broadcast(); err != nil {
+		eventStore.Publish(gbus.NewEvent(HouseWasSold{}, map[string]interface{}{"price": 100}))
+		
+		if err := eventStore.Broadcast(); err != nil {
 			log.Printf("Error broadcasting event: %v", err)
-			http.Error(w, "Failed to process event", http.StatusInternalServerError)
+			http.Error(w, "Event processing failed", http.StatusInternalServerError)
 			return
 		}
-
-		// Send response back to client
+		
 		w.Header().Set("Content-Type", "application/json")
-		response := map[string]string{"status": "House sold event published"}
-		json.NewEncoder(w).Encode(response)
+		json.NewEncoder(w).Encode(map[string]string{"status": "House sold event published"})
 	})
 
-	serverAddress := ":8080"
-	log.Printf("Server is listening on %s", serverAddress)
-	if err := http.ListenAndServe(serverAddress, router); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+	log.Println("Server running on :8080")
+	log.Fatal(http.ListenAndServe(":8080", router))
 }
 ```
 
-# Example 2
-run RabbitMQ
+### 3️⃣ Run Your Application
+
+```sh
+go run main.go
 ```
+
+Now, visiting `http://localhost:8080/house-sold` will trigger the event and process it.
+
+---
+
+## 🐇 RabbitMQ Integration
+
+### 1️⃣ Start RabbitMQ
+
+```sh
 docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4.0-management
 ```
-then run go run main.go
-```
+
+### 2️⃣ Implement Event Publishing in `main.go`
+
+```go
 package main
 
 import (
@@ -110,52 +116,41 @@ import (
 
 func NewDispatcher() *RabbitDispatcher {
 	return &RabbitDispatcher{
-		"HouseWasSold": func(m map[string]interface{}) (Result, error) {
-			price, ok := m["price"].(float64)
+		"HouseWasSold": func(data map[string]interface{}) (Result, error) {
+			price, ok := data["price"].(float64)
 			if !ok {
-				return Result{}, fmt.Errorf("price not provided or invalid")
+				return Result{}, fmt.Errorf("invalid or missing 'price'")
 			}
-
-			result := fmt.Sprintf("House was sold for %.2f", price)
-			return Result{Message: result}, nil
+			return Result{Message: fmt.Sprintf("House sold for %.2f", price)}, nil
 		},
 	}
 }
 
 func main() {
 	dispatcher := NewDispatcher()
-
 	rabbitStore, err := NewRabbitEventStore(dispatcher, "amqp://guest:guest@localhost:5672/", "events_queue")
 	if err != nil {
 		log.Fatalf("Failed to initialize RabbitEventStore: %v", err)
 	}
 
-	rabbitStore.Publish(&Event{
-		Id:         "12345",
-		Projection: "HouseWasSold",
-		Args: map[string]interface{}{
-			"price": 100.0,
-		},
-	})
-	rabbitStore.Publish(&Event{
-		Id:         "123456",
-		Projection: "HouseWasSold",
-		Args: map[string]interface{}{
-			"price": 200.0,
-		},
-	})
+	rabbitStore.Publish(&Event{Id: "12345", Projection: "HouseWasSold", Args: map[string]interface{}{"price": 100.0}})
+	rabbitStore.Publish(&Event{Id: "123456", Projection: "HouseWasSold", Args: map[string]interface{}{"price": 200.0}})
 
 	go rabbitStore.Broadcast()
-
 	select {}
 }
 ```
-3. Get the dependency
-```sh
-go get github.com/Raezil/GoEventBus
-``` 
 
-4. Run the project
+### 3️⃣ Run Your Application
+
 ```sh
-go run ./
+go run main.go
 ```
+
+---
+
+## 📖 References
+
+- [GoEventBus GitHub Repository](https://github.com/Raezil/GoEventBus)
+- [RabbitMQ Official Documentation](https://www.rabbitmq.com/)
+- [Event Sourcing Overview](https://martinfowler.com/eaaDev/EventSourcing.html)
