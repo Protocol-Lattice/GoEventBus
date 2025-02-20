@@ -91,7 +91,7 @@ func main() {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
-
+```
 
 # Example 2
 run RabbitMQ
