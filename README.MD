@@ -149,6 +149,16 @@ go run main.go
 
 ---
 
+## **📜 Contributing**
+Want to improve GoEventBus? 🚀  
+1. Fork the repo  
+2. Create a feature branch (`git checkout -b feature-new`)  
+3. Commit your changes (`git commit -m "Added feature"`)  
+4. Push to your branch (`git push origin feature-new`)  
+5. Submit a PR!  
+
+
+
 ## 📖 References
 
 - [GoEventBus GitHub Repository](https://github.com/Raezil/GoEventBus)
