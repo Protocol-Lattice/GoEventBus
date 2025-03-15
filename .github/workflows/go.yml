@@ -52,3 +52,16 @@ jobs:
       with:
         name: coverage-report
         path: coverage.out
+
+  coverage:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download Coverage Report
+      uses: actions/download-artifact@v3
+      with:
+        name: coverage-report
+
+    - name: Show Downloaded Coverage Report
+      run: cat coverage.out
