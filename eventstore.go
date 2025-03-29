@@ -20,7 +20,7 @@ func NewEventStore(dispatcher *Dispatcher) *EventStore {
 		Dispatcher: dispatcher,
 		Events: &sync.Pool{
 			New: func() interface{} {
-				return &Event{} // Return a new, non-nil Event instance
+				return nil
 			},
 		},
 	}
@@ -43,24 +43,26 @@ func (eventstore *EventStore) Commit() error {
 		return fmt.Errorf("invalid event type")
 	}
 
+	// Treat an event with an empty Id as an empty event
+	if event.Id == "" {
+		return fmt.Errorf("no events to process")
+	}
+
 	if eventstore.Dispatcher == nil {
 		return fmt.Errorf("dispatcher is nil")
 	}
 
-	// Check if the dispatcher has a handler for this event
 	handler, exists := (*eventstore.Dispatcher)[event.Projection]
 	if !exists {
 		return fmt.Errorf("no handler for event projection: %s", event.Projection)
 	}
 
-	// Execute the handler
 	_, err := handler(event.Args)
 	if err != nil {
 		return fmt.Errorf("error handling event: %w", err)
 	}
 
 	log.Printf("Event id: %s was successfully published", event.Id)
-
 	return nil
 }
 
