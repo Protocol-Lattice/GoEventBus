@@ -5,6 +5,7 @@
 </p>
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
+[![libs.tech recommends](https://libs.tech/project/849363374/badge.svg)](https://libs.tech/project/849363374/goeventbus)
 
 EventBus is a simple and efficient **event-driven system** for Go applications.  
 It allows you to **publish** and **subscribe** to events seamlessly.
