@@ -1,6 +1,7 @@
 package GoEventBus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -104,31 +105,36 @@ func (store *RabbitEventStore) Commit(event *Event) error {
 }
 
 // Broadcast starts consuming events from RabbitMQ
-func (store *RabbitEventStore) Broadcast() {
+func (store *RabbitEventStore) Broadcast(ctx context.Context) {
 	msgs, err := store.RabbitChannel.Consume(
 		store.QueueName,
 		"",
-		true,  // Auto-acknowledge
-		false, // Exclusive
-		false, // No-local
-		false, // No-wait
-		nil,   // Arguments
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		log.Fatalf("Failed to consume messages: %v", err)
 	}
 
-	for msg := range msgs {
-		event := &Event{}
-		err := json.Unmarshal(msg.Body, event)
-		if err != nil {
-			log.Printf("Error deserializing event: %v", err)
-			continue
-		}
-
-		err = store.Commit(event)
-		if err != nil {
-			log.Printf("Error committing event: %v", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-msgs:
+			if !ok {
+				return
+			}
+			event := &Event{}
+			if err := json.Unmarshal(msg.Body, event); err != nil {
+				log.Printf("Error deserializing event: %v", err)
+				continue
+			}
+			if err := store.Commit(event); err != nil {
+				log.Printf("Error committing event: %v", err)
+			}
 		}
 	}
 }

@@ -91,13 +91,14 @@ func TestRabbitEventStore_Commit(t *testing.T) {
 }
 
 func TestRabbitEventStore_Broadcast(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	req := testcontainers.ContainerRequest{
 		Image:        "rabbitmq:3",
 		ExposedPorts: []string{"5672/tcp"},
 		WaitingFor:   wait.ForListeningPort("5672/tcp"),
 	}
-	// Start the RabbitMQ container
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
@@ -107,7 +108,6 @@ func TestRabbitEventStore_Broadcast(t *testing.T) {
 	}
 	defer container.Terminate(ctx)
 
-	// Retrieve host and mapped port for connecting to RabbitMQ
 	host, err := container.Host(ctx)
 	if err != nil {
 		t.Fatalf("failed to get container host: %v", err)
@@ -123,15 +123,13 @@ func TestRabbitEventStore_Broadcast(t *testing.T) {
 	done := make(chan struct{})
 	dummyHandler := func(args map[string]interface{}) (Result, error) {
 		callCount++
-		// Signal that the event has been handled.
-		close(done)
+		close(done) // signal that the event has been handled.
 		return Result{Message: "handled"}, nil
 	}
 	dispatcher := RabbitDispatcher{
 		"testProjection": dummyHandler,
 	}
 
-	// Create a RabbitEventStore using the container's connection details and a queue named "testQueue"
 	store, err := NewRabbitEventStore(&dispatcher, rabbitURL, "testQueue")
 	if err != nil {
 		t.Fatalf("failed to create RabbitEventStore: %v", err)
@@ -139,8 +137,8 @@ func TestRabbitEventStore_Broadcast(t *testing.T) {
 	defer store.RabbitChannel.Close()
 	defer store.RabbitConn.Close()
 
-	// Start Broadcast in a separate goroutine.
-	go store.Broadcast()
+	// Start Broadcast in a separate goroutine with cancellation support.
+	go store.Broadcast(ctx)
 
 	// Publish an event.
 	event := NewEvent("testProjection", map[string]interface{}{"key": "value"})
@@ -153,6 +151,9 @@ func TestRabbitEventStore_Broadcast(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("timeout waiting for event to be processed")
 	}
+
+	// Cancel the Broadcast goroutine to ensure a clean shutdown.
+	cancel()
 
 	if callCount != 1 {
 		t.Errorf("expected handler to be called once, got %d", callCount)
