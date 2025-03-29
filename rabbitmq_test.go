@@ -89,3 +89,72 @@ func TestRabbitEventStore_Commit(t *testing.T) {
 		t.Errorf("expected handler to be called once, got %d", callCount)
 	}
 }
+
+func TestRabbitEventStore_Broadcast(t *testing.T) {
+	ctx := context.Background()
+	req := testcontainers.ContainerRequest{
+		Image:        "rabbitmq:3",
+		ExposedPorts: []string{"5672/tcp"},
+		WaitingFor:   wait.ForListeningPort("5672/tcp"),
+	}
+	// Start the RabbitMQ container
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("failed to start RabbitMQ container: %v", err)
+	}
+	defer container.Terminate(ctx)
+
+	// Retrieve host and mapped port for connecting to RabbitMQ
+	host, err := container.Host(ctx)
+	if err != nil {
+		t.Fatalf("failed to get container host: %v", err)
+	}
+	port, err := container.MappedPort(ctx, "5672")
+	if err != nil {
+		t.Fatalf("failed to get mapped port: %v", err)
+	}
+	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", host, port.Port())
+
+	// Set up a dummy handler that signals when the event is processed.
+	callCount := 0
+	done := make(chan struct{})
+	dummyHandler := func(args map[string]interface{}) (Result, error) {
+		callCount++
+		// Signal that the event has been handled.
+		close(done)
+		return Result{Message: "handled"}, nil
+	}
+	dispatcher := RabbitDispatcher{
+		"testProjection": dummyHandler,
+	}
+
+	// Create a RabbitEventStore using the container's connection details and a queue named "testQueue"
+	store, err := NewRabbitEventStore(&dispatcher, rabbitURL, "testQueue")
+	if err != nil {
+		t.Fatalf("failed to create RabbitEventStore: %v", err)
+	}
+	defer store.RabbitChannel.Close()
+	defer store.RabbitConn.Close()
+
+	// Start Broadcast in a separate goroutine.
+	go store.Broadcast()
+
+	// Publish an event.
+	event := NewEvent("testProjection", map[string]interface{}{"key": "value"})
+	store.Publish(event)
+
+	// Wait for the dummy handler to process the event or timeout.
+	select {
+	case <-done:
+		// Event was processed.
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timeout waiting for event to be processed")
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected handler to be called once, got %d", callCount)
+	}
+}
