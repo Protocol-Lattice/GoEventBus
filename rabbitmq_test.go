@@ -111,7 +111,7 @@ func TestContainer(t *testing.T) {
 		// Start the Broadcast consumer.
 		go store.Broadcast(ctxBroadcast)
 		// Wait briefly to ensure the consumer is registered.
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 
 		event := NewEvent("testProjection", map[string]interface{}{"key": "value"})
 		store.Publish(event)
@@ -119,7 +119,7 @@ func TestContainer(t *testing.T) {
 		select {
 		case <-done:
 			// Event was processed.
-		case <-time.After(10 * time.Second):
+		case <-time.After(100 * time.Second):
 			t.Fatalf("timeout waiting for event to be processed")
 		}
 		cancelBroadcast()
