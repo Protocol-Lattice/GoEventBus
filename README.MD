@@ -1,5 +1,3 @@
-# GoEventBus – A Lightweight Event Sourcing Library for Go
-
 <p align="center">
   <img src="https://github.com/Raezil/GoEventBus/blob/main/95a41958-9fd0-4ff9-9770-c2cfd30affb1.jpg?raw=true">
 </p>
