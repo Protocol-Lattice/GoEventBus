@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/Raezil/GoEventBus/blob/main/95a41958-9fd0-4ff9-9770-c2cfd30affb1.jpg?raw=true">
+  <img src="https://github.com/Raezil/GoEventBus/blob/main/examples/95a41958-9fd0-4ff9-9770-c2cfd30affb1.jpg?raw=true">
 </p>
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
