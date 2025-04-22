@@ -120,12 +120,23 @@ Dispatches all events from the last published position to the current head. Call
 
 All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
 
-| Benchmark                          | Iterations   | ns/op    |
-|------------------------------------|-------------:|---------:|
-| `BenchmarkSubscribe-8`             | 76,186,141   | 14.42    |
-| `BenchmarkPublish-8`               | 455,006,211  | 2.484    |
-| `BenchmarkSubscribeLargePayload-8` | 1,898,906    | 635.1    |
-| `BenchmarkPublishLargePayload-8`   | 437,931,962  | 2.544    |
+## Benchmarks
+
+All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
+
+| Benchmark                          | Iterations  | ns/op   | B/op  | allocs/op |
+|------------------------------------|------------:|--------:|------:|-----------:|
+| `BenchmarkSubscribe-8`             | 8,735,622   | 130.3   | 48    | 1         |
+| `BenchmarkSubscribeParallel-8`     | 23,469,384  | 63.96   | 48    | 1         |
+| `BenchmarkPublish-8`               | 329,031,526 | 3.787   | 0     | 0         |
+| `BenchmarkPublishAfterPrefill-8`   | 330,586,874 | 3.622   | 0     | 0         |
+| `BenchmarkSubscribeLargePayload-8` | 1,398,704   | 833.4   | 1408  | 4         |
+| `BenchmarkPublishLargePayload-8`   | 318,486,877 | 3.576   | 0     | 0         |
+| `BenchmarkEventStore_Async-8`      | 2,199,759   | 468.1   | 392   | 4         |
+| `BenchmarkEventStore_Sync-8`       | 2,336,882   | 473.6   | 392   | 3         |
+| `BenchmarkFastHTTPSync-8`          | 4,408,676   | 278.0   | 48    | 1         |
+| `BenchmarkFastHTTPAsync-8`         | 1,642,339   | 726.9   | 72    | 2         |
+| `BenchmarkFastHTTPParallel-8`      | 6,527,530   | 181.3   | 48    | 1         |
 
 
 ## Contributing
