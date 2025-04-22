@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestSubscribeAndPublish verifies that events are stored and published correctly.
@@ -262,4 +263,79 @@ func TestPublishIdempotent(t *testing.T) {
 	if called != 1 {
 		t.Errorf("idempotent publish: got %d calls; want 1", called)
 	}
+}
+
+func TestEventStore_AsyncDispatch(t *testing.T) {
+	var mu sync.Mutex
+	called := 0
+
+	dispatcher := Dispatcher{
+		"print": func(args map[string]any) (Result, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			called++
+			return Result{Message: "ok"}, nil
+		},
+	}
+
+	store := NewEventStore(&dispatcher)
+	store.Async = true
+
+	for i := 0; i < 10; i++ {
+		store.Subscribe(Event{
+			ID:         "e1",
+			Projection: "print",
+			Args:       map[string]any{"data": i},
+		})
+	}
+
+	store.Publish()
+
+	time.Sleep(100 * time.Millisecond) // allow goroutines to finish
+
+	mu.Lock()
+	defer mu.Unlock()
+	if called != 10 {
+		t.Errorf("Expected 10 calls, got %d", called)
+	}
+}
+
+func BenchmarkEventStore_Async(b *testing.B) {
+	dispatcher := Dispatcher{
+		"async": func(args map[string]any) (Result, error) {
+			return Result{Message: "done"}, nil
+		},
+	}
+
+	store := NewEventStore(&dispatcher)
+	store.Async = true
+
+	for i := 0; i < b.N; i++ {
+		store.Subscribe(Event{
+			ID:         "event",
+			Projection: "async",
+			Args:       map[string]any{"n": i},
+		})
+	}
+	store.Publish()
+}
+
+func BenchmarkEventStore_Sync(b *testing.B) {
+	dispatcher := Dispatcher{
+		"sync": func(args map[string]any) (Result, error) {
+			return Result{Message: "done"}, nil
+		},
+	}
+
+	store := NewEventStore(&dispatcher)
+	store.Async = false
+
+	for i := 0; i < b.N; i++ {
+		store.Subscribe(Event{
+			ID:         "event",
+			Projection: "sync",
+			Args:       map[string]any{"n": i},
+		})
+	}
+	store.Publish()
 }

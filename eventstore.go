@@ -30,10 +30,11 @@ type EventStore struct {
 	dispatcher *Dispatcher // handler registry (read-only)
 	buf        [size]Event // circular buffer
 
-	_    pad    // pad out to a full cache line
-	head uint64 // atomic write index
-	_    pad    // pad again
-	tail uint64 // atomic read index
+	_     pad    // pad out to a full cache line
+	head  uint64 // atomic write index
+	_     pad    // pad again
+	tail  uint64 // atomic read index
+	Async bool   // <-- Add this flag
 }
 
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
@@ -54,7 +55,6 @@ func (es *EventStore) Publish() {
 		return
 	}
 
-	// drop oldest only when we’ve exceeded capacity
 	if head-tail > size {
 		tail = head - size
 	}
@@ -66,7 +66,11 @@ func (es *EventStore) Publish() {
 	for i := tail; i < head; i++ {
 		ev := buf[i&mask]
 		if h, ok := disp[ev.Projection]; ok {
-			h(ev.Args)
+			if es.Async {
+				go h(ev.Args) // async handler call
+			} else {
+				h(ev.Args) // sync handler call
+			}
 		}
 	}
 	atomic.StoreUint64(&es.tail, head)
