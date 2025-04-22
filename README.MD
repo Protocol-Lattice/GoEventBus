@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
+</p>
+
 # GoEventBus
 
 A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus allows publishers to emit events and subscribers to handle those events asynchronously in a high-performance ring buffer.
