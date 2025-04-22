@@ -108,6 +108,18 @@ func (es *EventStore) Publish()
 ```
 Dispatches all events from the last published position to the current head. Calls the corresponding handler for each event if it exists.
 
+## Benchmarks
+
+All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
+
+| Benchmark                          | Iterations   | ns/op    |
+|------------------------------------|-------------:|---------:|
+| `BenchmarkSubscribe-8`             | 76,186,141   | 14.42    |
+| `BenchmarkPublish-8`               | 455,006,211  | 2.484    |
+| `BenchmarkSubscribeLargePayload-8` | 1,898,906    | 635.1    |
+| `BenchmarkPublishLargePayload-8`   | 437,931,962  | 2.544    |
+
+
 ## Contributing
 
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/yourusername/GoEventBus/issues).
