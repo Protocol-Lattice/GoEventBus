@@ -91,6 +91,7 @@ type EventStore struct {
     buf        [1<<16]Event // Ring buffer for storing events
     head       uint64       // Atomic write index
     tail       uint64       // Read index
+    Async      bool         // <-- Add this flag
 }
 ```
 
