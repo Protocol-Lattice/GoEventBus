@@ -1,90 +1,59 @@
 package GoEventBus
 
 import (
-	"fmt"
-	"log"
-	"sync"
+	"sync/atomic"
 )
 
-// EventStore handles publishing and dispatching events
+// Result represents the outcome of an event handler.
+type Result struct {
+	Message string
+}
+
+const size = 1 << 16
+
+// Dispatcher maps event IDs to handler functions.
+type Dispatcher map[any]func(map[string]any) (Result, error)
+
+type Event struct {
+	ID         string
+	Projection any
+	Args       map[string]any
+}
+
 type EventStore struct {
-	Mutex      sync.Mutex
-	Dispatcher *Dispatcher
-	Events     *sync.Pool
+	dispatcher *Dispatcher // drop the pointer indirection
+	buf        [size]Event
+	head       uint64 // atomic write index
+	tail       uint64 // next-to-read index (only by publisher)
 }
 
-// NewEventStore initializes an EventStore with a dispatcher and an event pool
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
-	return &EventStore{
-		Mutex:      sync.Mutex{},
-		Dispatcher: dispatcher,
-		Events: &sync.Pool{
-			New: func() interface{} {
-				return nil
-			},
-		},
-	}
+	return &EventStore{dispatcher: dispatcher}
 }
 
-// Publish adds an event to the event pool
-func (eventstore *EventStore) Publish(event *Event) {
-	eventstore.Events.Put(event)
+func (es *EventStore) Subscribe(e Event) {
+	idx := atomic.AddUint64(&es.head, 1) - 1
+	es.buf[idx&(size-1)] = e
 }
 
-// Commit retrieves and processes an event from the pool
-func (eventstore *EventStore) Commit() error {
-	curr := eventstore.Events.Get()
-	if curr == nil {
-		return fmt.Errorf("no events to process")
+func (es *EventStore) Publish() {
+	head := atomic.LoadUint64(&es.head)
+	tail := es.tail
+	if tail == head {
+		return
 	}
 
-	event, ok := curr.(*Event)
-	if !ok || event == nil {
-		return fmt.Errorf("invalid event type")
-	}
+	d := es.dispatcher // single indirection
+	buf := es.buf[:]
+	mask := uint64(size - 1)
 
-	// Treat an event with an empty Id as an empty event
-	if event.Id == "" {
-		return fmt.Errorf("no events to process")
-	}
-
-	if eventstore.Dispatcher == nil {
-		return fmt.Errorf("dispatcher is nil")
-	}
-
-	handler, exists := (*eventstore.Dispatcher)[event.Projection]
-	if !exists {
-		return fmt.Errorf("no handler for event projection: %s", event.Projection)
-	}
-
-	_, err := handler(event.Args)
-	if err != nil {
-		return fmt.Errorf("error handling event: %w", err)
-	}
-
-	log.Printf("Event id: %s was successfully published", event.Id)
-	return nil
-}
-
-// Broadcast locks the store and processes each event in the pool
-func (eventstore *EventStore) Broadcast() error {
-	eventstore.Mutex.Lock()
-	defer eventstore.Mutex.Unlock()
-
-	var lastErr error
-	// Try to commit an event
-	for {
-		err := eventstore.Commit()
-		if err != nil {
-			// If there are no more events to process, break the loop
-			if err.Error() != "" {
-				break
-			}
-			// Capture the last error if something else goes wrong
-			lastErr = err
+	// only walk [tail, head)
+	for i := tail; i < head; i++ {
+		ev := buf[i&mask]
+		if handler, ok := (*d)[ev.Projection]; ok {
+			handler(ev.Args)
 		}
-
 	}
 
-	return lastErr
+	es.tail = head
 }

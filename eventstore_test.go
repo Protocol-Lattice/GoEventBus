@@ -1,90 +1,112 @@
 package GoEventBus
 
 import (
-	"fmt"
-	"sync"
+	"sync/atomic"
 	"testing"
 )
 
-type testProjection struct{}
-type unknownProjection struct{}
+// TestSubscribeAndPublish verifies that events are stored and published correctly.
+func TestSubscribeAndPublish(t *testing.T) {
+	// Prepare dispatcher with two handlers
+	dispatcher := Dispatcher{}
+	var called1, called2 int32
+	dispatcher["evt1"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&called1, 1)
+		return Result{Message: "ok1"}, nil
+	}
+	dispatcher["evt2"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&called2, 1)
+		return Result{Message: "ok2"}, nil
+	}
 
-// TestCommitSuccess verifies that an event is processed successfully
-// when a valid handler exists in the dispatcher.
-func TestCommitSuccess(t *testing.T) {
-	var callCount int
-	dummyHandler := func(args map[string]interface{}) (Result, error) {
-		callCount++
-		return Result{Message: "handled"}, nil
+	es := NewEventStore(&dispatcher)
+
+	// Subscribe two events
+	es.Subscribe(Event{ID: "1", Projection: "evt1", Args: nil})
+	es.Subscribe(Event{ID: "2", Projection: "evt2", Args: nil})
+
+	// Publish all events
+	es.Publish()
+
+	if called1 != 1 {
+		t.Errorf("handler evt1 called %d times; want 1", called1)
 	}
-	dispatcher := Dispatcher{
-		testProjection{}: dummyHandler,
-	}
-	store := NewEventStore(&dispatcher)
-	event := NewEvent(testProjection{}, map[string]interface{}{"key": "value"})
-	store.Publish(event)
-	err := store.Commit()
-	if err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("expected handler to be called once, but got %d", callCount)
+	if called2 != 1 {
+		t.Errorf("handler evt2 called %d times; want 1", called2)
 	}
 }
 
-// TestCommitNoHandler verifies that Commit returns an error when no handler exists for the event.
-func TestCommitNoHandler(t *testing.T) {
-	dispatcher := Dispatcher{} // empty dispatcher
-	store := NewEventStore(&dispatcher)
-	event := NewEvent(unknownProjection{}, map[string]interface{}{"key": "value"})
-	store.Publish(event)
-	err := store.Commit()
-	errText := fmt.Sprintf("no handler for event projection: %s", unknownProjection{})
-	if err == nil {
-		t.Errorf("expected error for missing handler, got nil")
-	} else if err.Error() != errText {
-		t.Errorf("unexpected error: %v", err)
+// TestPublishWithMissingHandler ensures no panic when a handler is missing.
+func TestPublishWithMissingHandler(t *testing.T) {
+	// Dispatcher without handlers
+	dispatcher := Dispatcher{}
+	es := NewEventStore(&dispatcher)
+
+	// Subscribe an event with no corresponding handler
+	es.Subscribe(Event{ID: "3", Projection: "unknown", Args: nil})
+
+	// Should not panic
+	es.Publish()
+}
+
+// BenchmarkSubscribe measures the performance of Subscribe under load.
+func BenchmarkSubscribe(b *testing.B) {
+	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
+	es := NewEventStore(&dispatcher)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
 	}
 }
 
-// TestCommitDispatcherNil verifies that Commit returns an error when the dispatcher is nil.
-func TestCommitDispatcherNil(t *testing.T) {
-	// Manually create an EventStore with a nil Dispatcher.
-	store := &EventStore{
-		Dispatcher: nil,
-		Events: &sync.Pool{
-			New: func() interface{} {
-				return &Event{}
-			},
-		},
+// BenchmarkPublish measures the performance of Publish over a populated buffer.
+func BenchmarkPublish(b *testing.B) {
+	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
+	es := NewEventStore(&dispatcher)
+
+	// Pre-fill buffer with events
+	for i := 0; i < size; i++ {
+		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
 	}
-	event := NewEvent(testProjection{}, map[string]interface{}{"key": "value"})
-	store.Publish(event)
-	err := store.Commit()
-	if err == nil || err.Error() != "dispatcher is nil" {
-		t.Errorf("expected 'dispatcher is nil' error, got %v", err)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		es.Publish()
 	}
 }
 
-// TestBroadcast verifies that Broadcast processes all events in the pool.
-func TestBroadcast(t *testing.T) {
-	var callCount int
-	dummyHandler := func(args map[string]interface{}) (Result, error) {
-		callCount++
-		return Result{Message: "handled"}, nil
-	}
-	dispatcher := Dispatcher{
-		testProjection{}: dummyHandler,
-	}
-	store := NewEventStore(&dispatcher)
-	event1 := NewEvent(testProjection{}, map[string]interface{}{"key": "value1"})
-	event2 := NewEvent(testProjection{}, map[string]interface{}{"key": "value2"})
-	store.Publish(event1)
-	store.Publish(event2)
-	_ = store.Broadcast()
-	// Broadcast will process all published events and eventually return an error when no more events are available.
+// LargeStruct is a sample struct for payload-heavy benchmarks.
+type LargeStruct struct {
+	Data [1024]byte
+}
 
-	if callCount != 2 {
-		t.Errorf("expected 2 events handled, got %d", callCount)
+// BenchmarkSubscribeLargePayload benchmarks Subscribe with large struct payloads.
+func BenchmarkSubscribeLargePayload(b *testing.B) {
+	dispatcher := Dispatcher{"evtLarge": func(args map[string]any) (Result, error) { return Result{}, nil }}
+	es := NewEventStore(&dispatcher)
+	var payload LargeStruct
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		es.Subscribe(Event{ID: "bench", Projection: "evtLarge", Args: map[string]any{"payload": payload}})
+	}
+}
+
+// BenchmarkPublishLargePayload benchmarks Publish on a buffer pre-filled with events carrying large payloads.
+func BenchmarkPublishLargePayload(b *testing.B) {
+	dispatcher := Dispatcher{"evtLarge": func(args map[string]any) (Result, error) { return Result{}, nil }}
+	es := NewEventStore(&dispatcher)
+	var payload LargeStruct
+
+	// Pre-fill buffer
+	const largeSize = 100
+	for i := 0; i < largeSize; i++ {
+		es.Subscribe(Event{ID: "bench", Projection: "evtLarge", Args: map[string]any{"payload": payload}})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		es.Publish()
 	}
 }
