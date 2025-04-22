@@ -1,6 +1,7 @@
 package GoEventBus
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -198,5 +199,67 @@ func BenchmarkPublishLargePayload(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		es.Publish()
+	}
+}
+
+// TestExactBufferSizeNoOverflow enqueues exactly size events (no overflow),
+// and ensures Publish calls the handler size times.
+func TestExactBufferSizeNoOverflow(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var count uint64
+	dispatcher["evtExact"] = func(args map[string]any) (Result, error) {
+		atomic.AddUint64(&count, 1)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+
+	for i := 0; i < size; i++ {
+		es.Subscribe(Event{ID: strconv.Itoa(i), Projection: "evtExact", Args: nil})
+	}
+	es.Publish()
+
+	if count != size {
+		t.Errorf("no-overflow: got %d calls; want %d", count, size)
+	}
+}
+
+// TestOverflowThreshold enqueues size+1 events to trigger the exact threshold
+// overflow (idx-tail == size), dropping the first event.
+func TestOverflowThreshold(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var count uint64
+	dispatcher["evtThresh"] = func(args map[string]any) (Result, error) {
+		atomic.AddUint64(&count, 1)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+
+	for i := 0; i < size+1; i++ {
+		es.Subscribe(Event{ID: strconv.Itoa(i), Projection: "evtThresh", Args: nil})
+	}
+	es.Publish()
+
+	if count != size {
+		t.Errorf("threshold-overflow: got %d calls; want %d", count, size)
+	}
+}
+
+// TestPublishIdempotent ensures that calling Publish twice without new events
+// only invokes handlers once (early-return path when tail == head).
+func TestPublishIdempotent(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var called int32
+	dispatcher["evtOnce"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&called, 1)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+
+	es.Subscribe(Event{ID: "1", Projection: "evtOnce", Args: nil})
+	es.Publish()
+	es.Publish() // should return immediately, not call handler again
+
+	if called != 1 {
+		t.Errorf("idempotent publish: got %d calls; want 1", called)
 	}
 }
