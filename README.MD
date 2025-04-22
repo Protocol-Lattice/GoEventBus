@@ -11,7 +11,7 @@ A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus al
 ## Installation
 
 ```bash
-go get github.com/yourusername/GoEventBus
+go get github.com/Raezil/GoEventBus
 ```
 
 ## Quick Start
