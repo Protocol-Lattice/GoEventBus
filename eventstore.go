@@ -2,6 +2,7 @@ package GoEventBus
 
 import (
 	"sync/atomic"
+	"unsafe"
 )
 
 // Result represents the outcome of an event handler.
@@ -20,33 +21,32 @@ type Event struct {
 	Args       map[string]any
 }
 
+const cacheLine = 64
+
+type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
+
 // EventStore is a high-performance, lock-free ring buffer.
 type EventStore struct {
 	dispatcher *Dispatcher // handler registry (read-only)
 	buf        [size]Event // circular buffer
-	head       uint64      // atomic write index
-	tail       uint64      // atomic read index
+
+	_    pad    // pad out to a full cache line
+	head uint64 // atomic write index
+	_    pad    // pad again
+	tail uint64 // atomic read index
 }
 
-// NewEventStore initializes a new EventStore with handlers.
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
 	return &EventStore{dispatcher: dispatcher}
 }
 
-// Subscribe enqueues an event; if full, drops the oldest.
+// Subscribe just claims a slot and writes—no Load/Store on tail here.
 func (es *EventStore) Subscribe(e Event) {
 	idx := atomic.AddUint64(&es.head, 1) - 1
-
-	// drop oldest if buffer overflows
-	t := atomic.LoadUint64(&es.tail)
-	if idx-t >= size {
-		atomic.StoreUint64(&es.tail, idx-size+1)
-	}
-
 	es.buf[idx&(size-1)] = e
 }
 
-// Publish invokes handlers for all pending events.
+// Publish now also drops old events if we’ve overrun the ring.
 func (es *EventStore) Publish() {
 	head := atomic.LoadUint64(&es.head)
 	tail := atomic.LoadUint64(&es.tail)
@@ -54,7 +54,11 @@ func (es *EventStore) Publish() {
 		return
 	}
 
-	// cache locals for speed
+	// drop oldest only when we’ve exceeded capacity
+	if head-tail > size {
+		tail = head - size
+	}
+
 	disp := *es.dispatcher
 	buf := es.buf[:]
 	mask := uint64(size - 1)
@@ -65,6 +69,5 @@ func (es *EventStore) Publish() {
 			h(ev.Args)
 		}
 	}
-
 	atomic.StoreUint64(&es.tail, head)
 }
