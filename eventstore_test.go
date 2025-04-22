@@ -46,6 +46,27 @@ func TestPublishWithMissingHandler(t *testing.T) {
 	es.Publish()
 }
 
+// TestMissingAndExistingProjections ensures missing projections don't affect existing handlers.
+func TestPublishMixedExistingAndNonExisting(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var called int32
+	dispatcher["evt"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&called, 1)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+
+	// Subscribe one existing and one non-existing projection
+	es.Subscribe(Event{ID: "1", Projection: "evt", Args: nil})
+	es.Subscribe(Event{ID: "2", Projection: "noexist", Args: nil})
+
+	es.Publish()
+
+	if called != 1 {
+		t.Errorf("handler called %d times; want 1", called)
+	}
+}
+
 // TestOverflowBehavior ensures that when more events than buffer size are enqueued,
 // the oldest events are dropped.
 func TestOverflowBehavior(t *testing.T) {
