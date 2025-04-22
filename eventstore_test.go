@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 // TestSubscribeAndPublish verifies that events are stored and published correctly.
@@ -338,4 +340,57 @@ func BenchmarkEventStore_Sync(b *testing.B) {
 		})
 	}
 	store.Publish()
+}
+
+// helper to drive a fasthttp-style handler
+func benchmarkFastHTTP(b *testing.B, async bool) {
+	// minimal dispatcher for “evt” projection
+	dispatcher := Dispatcher{
+		"evt": func(args map[string]any) (Result, error) {
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher)
+	es.Async = async
+
+	// our “handler”
+	handler := func(ctx *fasthttp.RequestCtx) {
+		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
+		es.Publish()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ctx fasthttp.RequestCtx
+		handler(&ctx)
+	}
+}
+
+func BenchmarkFastHTTPSync(b *testing.B) {
+	benchmarkFastHTTP(b, false)
+}
+
+func BenchmarkFastHTTPAsync(b *testing.B) {
+	benchmarkFastHTTP(b, true)
+}
+
+// Parallel version if you want to stress concurrency:
+func BenchmarkFastHTTPParallel(b *testing.B) {
+	dispatcher := Dispatcher{
+		"evt": func(args map[string]any) (Result, error) { return Result{}, nil },
+	}
+	es := NewEventStore(&dispatcher)
+	es.Async = false
+
+	handler := func(ctx *fasthttp.RequestCtx) {
+		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
+		es.Publish()
+	}
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			var ctx fasthttp.RequestCtx
+			handler(&ctx)
+		}
+	})
 }
