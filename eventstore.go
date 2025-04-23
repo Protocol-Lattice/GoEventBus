@@ -30,26 +30,30 @@ type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
 type EventStore struct {
 	dispatcher *Dispatcher          // handler registry (read-only)
 	buf        [size]unsafe.Pointer // each element is *Event
-
-	_     pad    // pad to full cache line
-	head  uint64 // atomic write index
-	_     pad    // pad again
-	tail  uint64 // atomic read index
-	Async bool   // dispatch async if true
+	events     []Event              // pre-allocated event slots
+	_          pad                  // pad to full cache line
+	head       uint64               // atomic write index
+	_          pad                  // pad again
+	tail       uint64               // atomic read index
+	Async      bool                 // dispatch async if true
 }
 
 // NewEventStore initializes a new EventStore with the given dispatcher.
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
-	return &EventStore{dispatcher: dispatcher}
+	return &EventStore{dispatcher: dispatcher, events: make([]Event, size)}
 }
 
 // Subscribe atomically enqueues an Event by storing its pointer.
 func (es *EventStore) Subscribe(e Event) {
 	idx := atomic.AddUint64(&es.head, 1) - 1
 	slot := idx & (size - 1)
-	// allocate a copy of e and publish its pointer atomically
-	ptr := &e
-	atomic.StorePointer(&es.buf[slot], unsafe.Pointer(ptr))
+
+	// copy into the existing slot—no heap allocation
+	ev := &es.events[slot]
+	*ev = e
+
+	// publish pointer to that slot
+	atomic.StorePointer(&es.buf[slot], unsafe.Pointer(ev))
 }
 
 // Publish processes all pending events, dropping old ones on overflow.
