@@ -116,10 +116,6 @@ Dispatches all events from the last published position to the current head. Call
 
 ## Benchmarks
 
-All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
-
-## Benchmarks
-
 All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
 
 | Benchmark                         | Iterations  | ns/op  |
