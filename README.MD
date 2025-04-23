@@ -122,19 +122,20 @@ All benchmarks were run with Go’s testing harness (`go test -bench .`) on an 
 
 All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
 
-| Benchmark                          | Iterations  | ns/op   | B/op  | allocs/op |
-|------------------------------------|------------:|--------:|------:|-----------:|
-| `BenchmarkSubscribe-8`             | 8,735,622   | 130.3   | 48    | 1         |
-| `BenchmarkSubscribeParallel-8`     | 23,469,384  | 63.96   | 48    | 1         |
-| `BenchmarkPublish-8`               | 329,031,526 | 3.787   | 0     | 0         |
-| `BenchmarkPublishAfterPrefill-8`   | 330,586,874 | 3.622   | 0     | 0         |
-| `BenchmarkSubscribeLargePayload-8` | 1,398,704   | 833.4   | 1408  | 4         |
-| `BenchmarkPublishLargePayload-8`   | 318,486,877 | 3.576   | 0     | 0         |
-| `BenchmarkEventStore_Async-8`      | 2,199,759   | 468.1   | 392   | 4         |
-| `BenchmarkEventStore_Sync-8`       | 2,336,882   | 473.6   | 392   | 3         |
-| `BenchmarkFastHTTPSync-8`          | 4,408,676   | 278.0   | 48    | 1         |
-| `BenchmarkFastHTTPAsync-8`         | 1,642,339   | 726.9   | 72    | 2         |
-| `BenchmarkFastHTTPParallel-8`      | 6,527,530   | 181.3   | 48    | 1         |
+| Benchmark                         | Iterations  | ns/op  |
+|-----------------------------------|-----------:|-------:|
+| `BenchmarkSubscribe-8`            | 27,080,376  | 40.37  |
+| `BenchmarkSubscribeParallel-8`    | 26,418,999  | 38.42  |
+| `BenchmarkPublish-8`              | 295,661,464 | 3.910  |
+| `BenchmarkPublishAfterPrefill-8`  | 252,943,526 | 4.585  |
+| `BenchmarkSubscribeLargePayload-8`| 1,613,017   | 771.5  |
+| `BenchmarkPublishLargePayload-8`  | 296,434,225 | 3.910  |
+| `BenchmarkEventStore_Async-8`     | 2,816,988   | 436.5  |
+| `BenchmarkEventStore_Sync-8`      | 2,638,519   | 428.5  |
+| `BenchmarkFastHTTPSync-8`         | 6,275,112   | 163.8  |
+| `BenchmarkFastHTTPAsync-8`        | 1,954,884   | 662.0  |
+| `BenchmarkFastHTTPParallel-8`     | 4,489,274   | 262.3  |
+
 
 
 ## Contributing
