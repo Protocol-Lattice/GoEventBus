@@ -380,7 +380,7 @@ func BenchmarkFastHTTPParallel(b *testing.B) {
 		"evt": func(args map[string]any) (Result, error) { return Result{}, nil },
 	}
 	es := NewEventStore(&dispatcher)
-	es.Async = false
+	es.Async = true
 
 	handler := func(ctx *fasthttp.RequestCtx) {
 		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
