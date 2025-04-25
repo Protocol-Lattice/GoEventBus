@@ -7,10 +7,6 @@
 A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pipelines, microservices, and game loops.  
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](...)
-[![CI](https://github.com/Raezil/GoEventBus/actions/workflows/ci.yml/badge.svg)](...)
-[![Coverage](https://img.shields.io/codecov/c/github/Raezil/GoEventBus.svg)](...)
-[![GoDoc](https://pkg.go.dev/badge/github.com/Raezil/GoEventBus)](...)
-[![Release](https://img.shields.io/github/v/release/Raezil/GoEventBus.svg)](...)
 
 ## 📚 Table of Contents
 - [Features](#features)
