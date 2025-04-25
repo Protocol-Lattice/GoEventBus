@@ -18,7 +18,7 @@ type Result struct {
 type OverrunPolicy int
 
 const (
-	// DropOldest discards the oldest events when the buffer is full (default—behaviour prior to 2025‑04 update).
+	// DropOldest discards the oldest events when the buffer is full.
 	DropOldest OverrunPolicy = iota
 	// Block causes Subscribe to block (respecting ctx) until space is available.
 	Block
@@ -33,8 +33,19 @@ const cacheLine = 64
 
 type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
 
-// Dispatcher maps event projections to handler functions that now accept context.
-type Dispatcher map[interface{}]func(context.Context, map[string]any) (Result, error)
+// HandlerFunc is the signature for event handlers and middleware.
+type HandlerFunc func(context.Context, map[string]any) (Result, error)
+
+// Middleware wraps a HandlerFunc, returning a new HandlerFunc.
+type Middleware func(HandlerFunc) HandlerFunc
+
+// Hook types for before, after, and error events.
+type BeforeHook func(context.Context, Event)
+type AfterHook func(context.Context, Event, Result, error)
+type ErrorHook func(context.Context, Event, error)
+
+// Dispatcher maps event projections to handler functions.
+type Dispatcher map[interface{}]HandlerFunc
 
 // Event is a unit of work to be dispatched.
 type Event struct {
@@ -43,7 +54,7 @@ type Event struct {
 	Args       map[string]any
 }
 
-// EventStore is a high‑performance, lock‑free ring buffer with optional back‑pressure.
+// EventStore is a high-performance, lock-free ring buffer with middleware and hooks support.
 type EventStore struct {
 	dispatcher *Dispatcher
 	size       uint64
@@ -57,6 +68,12 @@ type EventStore struct {
 	// Config flags
 	Async         bool
 	OverrunPolicy OverrunPolicy
+
+	// Middleware chain and hooks
+	middlewares []Middleware
+	beforeHooks []BeforeHook
+	afterHooks  []AfterHook
+	errorHooks  []ErrorHook
 
 	// Counters
 	publishedCount uint64
@@ -78,7 +95,27 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 	}
 }
 
-// Subscribe enqueues an Event, applying back‑pressure according to OverrunPolicy.
+// Use adds middleware to the EventStore. It will be applied in the order added.
+func (es *EventStore) Use(mw Middleware) {
+	es.middlewares = append(es.middlewares, mw)
+}
+
+// OnBefore registers a hook that runs before each handler invocation.
+func (es *EventStore) OnBefore(hook BeforeHook) {
+	es.beforeHooks = append(es.beforeHooks, hook)
+}
+
+// OnAfter registers a hook that runs after each handler invocation (even on error).
+func (es *EventStore) OnAfter(hook AfterHook) {
+	es.afterHooks = append(es.afterHooks, hook)
+}
+
+// OnError registers a hook that runs only when a handler returns an error.
+func (es *EventStore) OnError(hook ErrorHook) {
+	es.errorHooks = append(es.errorHooks, hook)
+}
+
+// Subscribe enqueues an Event, applying back-pressure according to OverrunPolicy.
 func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 	for {
 		head := atomic.LoadUint64(&es.head)
@@ -97,13 +134,11 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 		// buffer full – resolve based on policy
 		switch es.OverrunPolicy {
 		case DropOldest:
-			// advance tail to make room and drop oldest event
 			atomic.AddUint64(&es.tail, 1)
 			continue
 		case ReturnError:
 			return ErrBufferFull
 		case Block:
-			// simple back‑off sleep; yield first
 			runtime.Gosched()
 			select {
 			case <-ctx.Done():
@@ -114,7 +149,7 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 	}
 }
 
-// Publish processes all pending events.
+// Publish processes all pending events, applying middleware and hooks.
 func (es *EventStore) Publish() {
 	head := atomic.LoadUint64(&es.head)
 	tail := atomic.LoadUint64(&es.tail)
@@ -128,31 +163,55 @@ func (es *EventStore) Publish() {
 	for i := tail; i < head; i++ {
 		p := atomic.LoadPointer(&es.buf[i&mask])
 		if p == nil {
-			continue // slot not written yet
+			continue
 		}
 		ev := *(*Event)(p)
-		if h, ok := disp[ev.Projection]; ok {
+		if handler, ok := disp[ev.Projection]; ok {
 			if es.Async {
-				// fire‑and‑forget goroutine
-				go es.invoke(h, ev)
+				// fire-and-forget
+				go es.execute(handler, ev)
 			} else {
-				es.invoke(h, ev)
+				es.execute(handler, ev)
 			}
 		}
 	}
 	atomic.StoreUint64(&es.tail, head)
 }
 
-func (es *EventStore) invoke(h func(context.Context, map[string]any) (Result, error), ev Event) {
-	// invoke with background if no context provided (legacy support)
+// execute runs the handler with middleware and hooks.
+func (es *EventStore) execute(h HandlerFunc, ev Event) {
+	// establish context
 	ctx := context.Background()
 	if c, ok := ev.Args["__ctx"].(context.Context); ok && c != nil {
 		ctx = c
 	}
-	_, err := h(ctx, ev.Args)
+
+	// Before hooks
+	for _, hook := range es.beforeHooks {
+		hook(ctx, ev)
+	}
+
+	// apply middleware chain
+	wrapped := h
+	for i := len(es.middlewares) - 1; i >= 0; i-- {
+		wrapped = es.middlewares[i](wrapped)
+	}
+
+	// invoke handler
+	res, err := wrapped(ctx, ev.Args)
 	atomic.AddUint64(&es.processedCount, 1)
+
+	// After hooks
+	for _, hook := range es.afterHooks {
+		hook(ctx, ev, res, err)
+	}
+
+	// Error hooks and count
 	if err != nil {
 		atomic.AddUint64(&es.errorCount, 1)
+		for _, hook := range es.errorHooks {
+			hook(ctx, ev, err)
+		}
 	}
 }
 

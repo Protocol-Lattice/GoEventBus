@@ -593,3 +593,121 @@ func BenchmarkPublishWithErrors(b *testing.B) {
 		es.Publish()
 	}
 }
+
+// Test basic Subscribe and Publish functionality in synchronous mode.
+func TestEventStore_SubscribePublish_Sync(t *testing.T) {
+	disp := Dispatcher{}
+	// simple echo handler
+	disp["echo"] = func(ctx context.Context, args map[string]any) (Result, error) {
+		return Result{Message: args["msg"].(string)}, nil
+	}
+	store := NewEventStore(&disp, 8, DropOldest)
+	e := Event{ID: "1", Projection: "echo", Args: map[string]any{"msg": "hello"}}
+	if err := store.Subscribe(context.Background(), e); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	store.Publish()
+	pub, proc, errs := store.Metrics()
+	if pub != 1 || proc != 1 || errs != 0 {
+		t.Errorf("Metrics mismatch: published=%d, processed=%d, errors=%d", pub, proc, errs)
+	}
+}
+
+// Test middleware chaining.
+func TestEventStore_Middleware(t *testing.T) {
+	disp := Dispatcher{}
+	disp["inc"] = func(ctx context.Context, args map[string]any) (Result, error) {
+		// return current value
+		return Result{Message: ""}, nil
+	}
+	store := NewEventStore(&disp, 8, DropOldest)
+	// middleware increments counter before handler
+	store.Use(func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, args map[string]any) (Result, error) {
+			args["cnt"] = args["cnt"].(int) + 1
+			return next(ctx, args)
+		}
+	})
+	e := Event{ID: "1", Projection: "inc", Args: map[string]any{"cnt": 0}}
+	if err := store.Subscribe(context.Background(), e); err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	store.Publish()
+	// after middleware, cnt should be 1
+	if e.Args["cnt"].(int) != 1 {
+		t.Errorf("Middleware did not run, cnt=%v", e.Args["cnt"])
+	}
+}
+
+// Test hooks invocation order and error hooks.
+func TestEventStore_Hooks(t *testing.T) {
+	disp := Dispatcher{}
+	errorMsg := "handler error"
+	disp["fail"] = func(ctx context.Context, args map[string]any) (Result, error) {
+		return Result{}, errors.New(errorMsg)
+	}
+	store := NewEventStore(&disp, 8, DropOldest)
+
+	var beforeCalled, afterCalled, errorCalled atomic.Bool
+
+	store.OnBefore(func(ctx context.Context, ev Event) {
+		beforeCalled.Store(true)
+	})
+	store.OnAfter(func(ctx context.Context, ev Event, res Result, err error) {
+		afterCalled.Store(true)
+	})
+	store.OnError(func(ctx context.Context, ev Event, err error) {
+		errorCalled.Store(true)
+	})
+
+	e := Event{ID: "1", Projection: "fail", Args: map[string]any{}}
+	_ = store.Subscribe(context.Background(), e)
+	store.Publish()
+
+	if !beforeCalled.Load() {
+		t.Error("Before hook not called")
+	}
+	if !afterCalled.Load() {
+		t.Error("After hook not called")
+	}
+	if !errorCalled.Load() {
+		t.Error("Error hook not called")
+	}
+}
+
+// Benchmark Subscribe+Publish in synchronous mode.
+func BenchmarkEventStore_SubscribePublish_Sync(b *testing.B) {
+	disp := Dispatcher{}
+	disp["noop"] = func(ctx context.Context, args map[string]any) (Result, error) {
+		return Result{}, nil
+	}
+	store := NewEventStore(&disp, 1024, DropOldest)
+	e := Event{ID: "bench", Projection: "noop", Args: map[string]any{}}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := store.Subscribe(context.Background(), e); err != nil {
+			b.Fatal(err)
+		}
+		store.Publish()
+	}
+}
+
+// Benchmark Subscribe in asynchronous mode (handlers in goroutines).
+func BenchmarkEventStore_SubscribePublish_Async(b *testing.B) {
+	disp := Dispatcher{}
+	disp["noop"] = func(ctx context.Context, args map[string]any) (Result, error) {
+		return Result{}, nil
+	}
+	store := NewEventStore(&disp, 1024, DropOldest)
+	store.Async = true
+	e := Event{ID: "bench", Projection: "noop", Args: map[string]any{}}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := store.Subscribe(context.Background(), e); err != nil {
+			b.Fatal(err)
+		}
+		store.Publish()
+	}
+}
