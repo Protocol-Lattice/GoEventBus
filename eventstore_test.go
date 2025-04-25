@@ -410,3 +410,76 @@ func TestEventStore_Metrics(t *testing.T) {
 		t.Fatalf("after publish: got %d %d %d", published, processed, errors)
 	}
 }
+
+// helper no‑op handler that increments a counter so we know it was invoked.
+func noopHandler(counter *uint64) func(context.Context, map[string]any) (Result, error) {
+	return func(ctx context.Context, args map[string]any) (Result, error) {
+		atomic.AddUint64(counter, 1)
+		return Result{Message: "ok"}, nil
+	}
+}
+
+// TestMetricsCounts ensures that the published/processed/error counters are accurate.
+func TestMetricsCounts(t *testing.T) {
+	var invoked uint64
+	disp := Dispatcher{"test": noopHandler(&invoked)}
+	es := NewEventStore(&disp, 8, DropOldest)
+
+	// publish 5 successful events
+	for i := 0; i < 5; i++ {
+		if err := es.Subscribe(context.Background(), Event{ID: "e", Projection: "test", Args: map[string]any{}}); err != nil {
+			t.Fatalf("unexpected Subscribe error: %v", err)
+		}
+	}
+
+	es.Publish()
+
+	pub, proc, errCnt := es.Metrics()
+	if pub != 5 || proc != 5 || errCnt != 0 {
+		t.Fatalf("unexpected metrics: published=%d processed=%d errors=%d", pub, proc, errCnt)
+	}
+	if atomic.LoadUint64(&invoked) != 5 {
+		t.Fatalf("handler invoked %d times, want 5", invoked)
+	}
+}
+
+// TestOverrunPolicyReturnError verifies that Subscribe returns ErrBufferFull
+// when the buffer is full and policy is ReturnError.
+func TestOverrunPolicyReturnError(t *testing.T) {
+	disp := Dispatcher{}
+	es := NewEventStore(&disp, 2, ReturnError)
+
+	// fill buffer
+	_ = es.Subscribe(context.Background(), Event{})
+	_ = es.Subscribe(context.Background(), Event{})
+
+	if err := es.Subscribe(context.Background(), Event{}); err != ErrBufferFull {
+		t.Fatalf("expected ErrBufferFull, got %v", err)
+	}
+}
+
+// BenchmarkPublish measures throughput of synchronous vs asynchronous Publish.
+func BenchmarkSubscribePublish(b *testing.B) {
+	bench := func(async bool) {
+		var invoked uint64
+		disp := Dispatcher{"bench": noopHandler(&invoked)}
+		es := NewEventStore(&disp, 1024, DropOldest)
+		es.Async = async
+		ctx := context.Background()
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = es.Subscribe(ctx, Event{Projection: "bench"})
+			es.Publish()
+		}
+		b.StopTimer()
+
+		// wait for async goroutines to finish to avoid leaking
+		if async {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	b.Run("Sync", func(b *testing.B) { bench(false) })
+	b.Run("Async", func(b *testing.B) { bench(true) })
+}
