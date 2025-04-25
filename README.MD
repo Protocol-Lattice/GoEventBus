@@ -70,7 +70,6 @@ func main() {
         },
     }
 
-    // Initialize the event store with a 64K-slot buffer
     store := GoEventBus.NewEventStore(&dispatcher, 1<<16)
 
     // Optionally, run handlers asynchronously
