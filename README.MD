@@ -180,6 +180,17 @@ func (es *EventStore) Publish()
 ```
 Dispatches all events from the last published position to the current head. If `Async` is true, handlers run in separate goroutines; otherwise they run in the caller's goroutine.
 
+## Middleware & Hooks
+
+Middleware wraps handlers to implement logging, metrics, auth, etc.:
+
+```go
+store.Use(myMiddleware)
+store.OnBefore(myBeforeHook)
+store.OnAfter(myAfterHook)
+store.OnError(myErrorHook)
+```
+
 #### `Metrics`
 
 ```go
