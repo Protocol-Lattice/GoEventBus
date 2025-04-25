@@ -2,6 +2,7 @@ package GoEventBus
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -482,4 +483,113 @@ func BenchmarkSubscribePublish(b *testing.B) {
 
 	b.Run("Sync", func(b *testing.B) { bench(false) })
 	b.Run("Async", func(b *testing.B) { bench(true) })
+}
+
+// TestContextPropagation verifies that a context injected through Args["__ctx"]
+// is forwarded to the handler.
+func TestContextPropagation(t *testing.T) {
+	const key, val = "myKey", "myVal"
+
+	// prepare a context with a distinctive value
+	ctx := context.WithValue(context.Background(), key, val)
+
+	var received string
+	disp := Dispatcher{
+		"ctx": func(c context.Context, _ map[string]any) (Result, error) {
+			if v, ok := c.Value(key).(string); ok {
+				received = v
+			}
+			return Result{}, nil
+		},
+	}
+
+	es := NewEventStore(&disp, 8, DropOldest)
+	// inject ctx via the reserved "__ctx" argument key
+	_ = es.Subscribe(context.Background(), Event{ID: "1", Projection: "ctx", Args: map[string]any{"__ctx": ctx}})
+	es.Publish()
+
+	if received != val {
+		t.Fatalf("context value mismatch: want %q got %q", val, received)
+	}
+}
+
+// TestOverrunPolicyBlockRespectsContext ensures that Subscribe returns the
+// caller's context error when the buffer remains full beyond the deadline.
+func TestOverrunPolicyBlockRespectsContext(t *testing.T) {
+	disp := Dispatcher{}
+	es := NewEventStore(&disp, 2, Block) // intentionally small buffer
+
+	// pre‑fill to capacity so subsequent Subscribe must block
+	_ = es.Subscribe(context.Background(), Event{})
+	_ = es.Subscribe(context.Background(), Event{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := es.Subscribe(ctx, Event{})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if elapsed < 40*time.Millisecond {
+		t.Fatalf("Subscribe returned too early: elapsed %v < ctx timeout", elapsed)
+	}
+}
+
+// TestErrorMetrics verifies that handler failures are reflected in Metrics().
+func TestErrorMetrics(t *testing.T) {
+	disp := Dispatcher{"boom": func(_ context.Context, _ map[string]any) (Result, error) {
+		return Result{}, errors.New("boom")
+	}}
+	es := NewEventStore(&disp, 4, DropOldest)
+
+	_ = es.Subscribe(context.Background(), Event{ID: "e", Projection: "boom"})
+	es.Publish()
+
+	pub, proc, errs := es.Metrics()
+	if pub != 1 || proc != 1 || errs != 1 {
+		t.Fatalf("unexpected metrics – published=%d processed=%d errors=%d", pub, proc, errs)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Micro‑benchmarks for Block policy and error‑heavy workloads.
+// -----------------------------------------------------------------------------
+
+func BenchmarkSubscribeBlockPolicy(b *testing.B) {
+	disp := Dispatcher{}
+	es := NewEventStore(&disp, 1024, Block)
+
+	// Fill the buffer to force Subscribe to exercise the Block path.
+	for i := 0; i < 1024; i++ {
+		_ = es.Subscribe(context.Background(), Event{})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// use an already‑expired context so the call returns immediately via the Block path
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = es.Subscribe(ctx, Event{})
+	}
+}
+
+func BenchmarkPublishWithErrors(b *testing.B) {
+	disp := Dispatcher{"err": func(_ context.Context, _ map[string]any) (Result, error) { return Result{}, errors.New("fail") }}
+	es := NewEventStore(&disp, 1<<16, DropOldest)
+
+	// pre‑populate with events that will all fail
+	for i := 0; i < 1<<16; i++ {
+		_ = es.Subscribe(context.Background(), Event{ID: "e", Projection: "err"})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		es.Publish()
+	}
 }
