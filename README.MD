@@ -12,6 +12,7 @@ A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus al
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
+- [Use Cases](#-use-cases)
 - [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License](#license)
@@ -146,6 +147,12 @@ func (es *EventStore) Metrics() (published, processed, errors uint64)
 ```
 Returns the total count of published, processed, and errored events.
 
+#### 💡 Use Cases
+- Real-time event processing in high-throughput systems
+- Background job orchestration
+- Metrics/event auditing pipelines
+- Async task scheduling (with optional sync fallback)
+
 ## Benchmarks
 
 All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration.
@@ -163,6 +170,7 @@ All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `
 | `BenchmarkFastHTTPSync-8`         | 6,275,112    | 163.8  |
 | `BenchmarkFastHTTPAsync-8`        | 1,954,884    | 662.0  |
 | `BenchmarkFastHTTPParallel-8`     | 4,489,274    | 262.3  |
+
 
 ## Contributing
 
