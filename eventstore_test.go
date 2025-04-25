@@ -394,3 +394,79 @@ func BenchmarkFastHTTPParallel(b *testing.B) {
 		}
 	})
 }
+
+// TestPublishEmpty ensures Publish on a new EventStore with no subscriptions does nothing (no panic)
+func TestPublishEmpty(t *testing.T) {
+	// Create a dispatcher and event store
+	dispatcher := Dispatcher{}
+	es := NewEventStore(&dispatcher)
+
+	// Capture the initial head and tail values
+	initialHead := es.head
+	initialTail := es.tail
+
+	// Call Publish with no events subscribed
+	es.Publish()
+
+	// Verify head and tail remain unchanged
+	if es.head != initialHead {
+		t.Errorf("Head counter changed: expected %d, got %d", initialHead, es.head)
+	}
+
+	if es.tail != initialTail {
+		t.Errorf("Tail counter changed: expected %d, got %d", initialTail, es.tail)
+	}
+
+	// Verify both values are still zero
+	if initialHead != 0 || initialTail != 0 {
+		t.Errorf("Initial counters should be zero: head=%d, tail=%d", initialHead, initialTail)
+	}
+}
+
+// TestArgsPassing verifies that event arguments are correctly passed to the handler
+func TestArgsPassing(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var received string
+	dispatcher["echo"] = func(args map[string]any) (Result, error) {
+		received = args["foo"].(string)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+	// Subscribe an event with a specific argument
+	args := map[string]any{"foo": "bar"}
+	es.Subscribe(Event{ID: "1", Projection: "echo", Args: args})
+	es.Publish()
+	if received != "bar" {
+		t.Errorf("expected argument 'bar'; got '%s'", received)
+	}
+}
+
+// TestDispatcherSnapshot ensures that the dispatcher snapshot is taken at Publish time
+func TestDispatcherSnapshot(t *testing.T) {
+	dispatcher := Dispatcher{}
+	var calledOriginal, calledModified int32
+
+	// Initial handler (should not be called)
+	dispatcher["snap"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&calledOriginal, 1)
+		return Result{}, nil
+	}
+	es := NewEventStore(&dispatcher)
+
+	// Replace the handler before publishing
+	dispatcher["snap"] = func(args map[string]any) (Result, error) {
+		atomic.AddInt32(&calledModified, 1)
+		return Result{}, nil
+	}
+
+	// Subscribe uses the updated dispatcher when publishing
+	es.Subscribe(Event{ID: "1", Projection: "snap", Args: nil})
+	es.Publish()
+
+	if calledOriginal != 0 {
+		t.Errorf("original handler should not have been called; got %d", calledOriginal)
+	}
+	if calledModified != 1 {
+		t.Errorf("modified handler should have been called once; got %d", calledModified)
+	}
+}
