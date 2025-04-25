@@ -2,6 +2,11 @@
   <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
 </p>
 
+# GoEventBus
+[![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
+
+A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus allows publishers to emit events and subscribers to handle those events asynchronously in a high-performance ring buffer.
+
 ## 📚 Table of Contents
 - [Features](#features)
 - [Installation](#installation)
@@ -11,11 +16,6 @@
 - [Contributing](#contributing)
 - [License](#license)
 
-
-# GoEventBus
-[![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
-
-A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus allows publishers to emit events and subscribers to handle those events asynchronously in a high-performance ring buffer.
 
 ## Features
 
