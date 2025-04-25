@@ -94,8 +94,7 @@ func main() {
 
     // Retrieve metrics
     published, processed, errors := store.Metrics()
-    fmt.Printf("published=%d processed=%d errors=%d
-", published, processed, errors)
+    fmt.Printf("published=%d processed=%d errors=%d", published, processed, errors)
 }
 ```
 
