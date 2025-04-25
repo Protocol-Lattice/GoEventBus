@@ -2,9 +2,15 @@
   <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
 </p>
 
-<p align="center">
-  <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
-</p>
+## 📚 Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+- [Benchmarks](#benchmarks)
+- [Contributing](#contributing)
+- [License](#license)
+
 
 # GoEventBus
 [![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
