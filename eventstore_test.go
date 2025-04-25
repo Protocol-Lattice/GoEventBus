@@ -470,3 +470,30 @@ func TestDispatcherSnapshot(t *testing.T) {
 		t.Errorf("modified handler should have been called once; got %d", calledModified)
 	}
 }
+
+func TestEventStore_Metrics(t *testing.T) {
+	dispatcher := Dispatcher{
+		"metric": func(args map[string]any) (Result, error) {
+			return Result{}, nil
+		},
+	}
+
+	es := NewEventStore(&dispatcher)
+
+	es.Subscribe(Event{ID: "1", Projection: "metric", Args: nil})
+	es.Subscribe(Event{ID: "2", Projection: "metric", Args: nil})
+
+	// Przed publikacją metryki powinny wskazywać tylko na publikacje
+	published, processed, errors := es.Metrics()
+	if published != 2 || processed != 0 || errors != 0 {
+		t.Errorf("before publish: got (published=%d, processed=%d, errors=%d); want (2, 0, 0)", published, processed, errors)
+	}
+
+	es.Publish()
+
+	// Po publikacji przetworzone powinny wynosić 2
+	published, processed, errors = es.Metrics()
+	if published != 2 || processed != 2 || errors != 0 {
+		t.Errorf("after publish: got (published=%d, processed=%d, errors=%d); want (2, 2, 0)", published, processed, errors)
+	}
+}

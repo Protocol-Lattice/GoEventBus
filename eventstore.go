@@ -36,15 +36,25 @@ type EventStore struct {
 	_          pad                  // pad again
 	tail       uint64               // atomic read index
 	Async      bool                 // dispatch async if true
+
+	// Metrics
+	publishedCount uint64
+	processedCount uint64
+	errorCount     uint64
 }
 
 // NewEventStore initializes a new EventStore with the given dispatcher.
 func NewEventStore(dispatcher *Dispatcher) *EventStore {
-	return &EventStore{dispatcher: dispatcher, events: make([]Event, size)}
+	return &EventStore{
+		dispatcher: dispatcher,
+		events:     make([]Event, size),
+	}
 }
 
 // Subscribe atomically enqueues an Event by storing its pointer.
 func (es *EventStore) Subscribe(e Event) {
+	atomic.AddUint64(&es.publishedCount, 1)
+
 	idx := atomic.AddUint64(&es.head, 1) - 1
 	slot := idx & (size - 1)
 
@@ -79,11 +89,28 @@ func (es *EventStore) Publish() {
 		ev := *(*Event)(p)
 		if h, ok := disp[ev.Projection]; ok {
 			if es.Async {
-				go h(ev.Args)
+				go func(args map[string]any) {
+					_, err := h(args)
+					atomic.AddUint64(&es.processedCount, 1)
+					if err != nil {
+						atomic.AddUint64(&es.errorCount, 1)
+					}
+				}(ev.Args)
 			} else {
-				h(ev.Args)
+				_, err := h(ev.Args)
+				atomic.AddUint64(&es.processedCount, 1)
+				if err != nil {
+					atomic.AddUint64(&es.errorCount, 1)
+				}
 			}
 		}
 	}
 	atomic.StoreUint64(&es.tail, head)
+}
+
+// Metrics returns current counters for published, processed and errored events.
+func (es *EventStore) Metrics() (published, processed, errors uint64) {
+	return atomic.LoadUint64(&es.publishedCount),
+		atomic.LoadUint64(&es.processedCount),
+		atomic.LoadUint64(&es.errorCount)
 }
