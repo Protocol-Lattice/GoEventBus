@@ -186,6 +186,9 @@ Middleware wraps handlers to implement logging, metrics, auth, etc.:
 
 ```go
 store.Use(myMiddleware)
+```
+Lifecycle hooks fire at key moments:
+```
 store.OnBefore(myBeforeHook)
 store.OnAfter(myAfterHook)
 store.OnError(myErrorHook)
