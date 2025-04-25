@@ -2,6 +2,10 @@
   <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
 </p>
 
+<p align="center">
+  <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
+</p>
+
 # GoEventBus
 
 A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pipelines, microservices, and game loops.  
@@ -10,6 +14,7 @@ A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pi
 
 ## 📚 Table of Contents
 - [Features](#features)
+- [Why GoEventBus?](#why-goeventbus)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
@@ -195,7 +200,7 @@ All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/yourusername/GoEventBus/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Raezil/GoEventBus/issues).
 
 ## License
 
