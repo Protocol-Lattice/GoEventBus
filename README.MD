@@ -14,7 +14,7 @@ A blazing‑fast, in‑memory, lock‑free event bus for Go—ideal for low‑la
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
-- [Back‑pressure & Overrun Policies](#back-pressure--overrun-policies)
+- [Back-pressure and Overrun Policies](#back-pressure-and-overrun-policies)
 - [Use Cases](#-use-cases)
 - [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
@@ -187,8 +187,7 @@ func (es *EventStore) Metrics() (published, processed, errors uint64)
 ```
 Returns the total count of published, processed, and errored events.
 
-## Back‑pressure & Overrun Policies
-
++ ## Back-pressure and Overrun Policies
 GoEventBus provides three strategies for handling a saturated ring buffer:
 
 | Policy       | Behaviour                                                                                     | When to use                                  |
