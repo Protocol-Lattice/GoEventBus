@@ -28,6 +28,22 @@ A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pi
 - **Metrics**: Track published, processed, and errored event counts with a simple API.
 - **Simple API**: Easy to subscribe, publish, and retrieve metrics.
 
+## Why GoEventBus?
+
+Modern Go apps demand lightning-fast, non-blocking communication—but channels can bottleneck and external brokers add latency, complexity and ops overhead. GoEventBus is your in-process, lock-free solution:
+
+- **Micro-latency dispatch**  
+  Atomic, cache-aligned ring buffers deliver sub-microsecond handoffs—no locks, no syscalls, zero garbage.  
+- **Sync or Async at will**  
+  Flip a switch to run handlers inline for predictability or in goroutines for massive parallelism.  
+- **Built-in observability**  
+  Expose counters for published, processed and errored events out of the box—no extra instrumentation.  
+- **Drop-in, zero deps**  
+  One import, no external services, no workers to manage—just Go 1.18+ and you’re off.  
+
+Whether you’re building real-time analytics, high-throughput microservices, or game engines, GoEventBus keeps your events moving at Go-speed.
+
+
 ## Installation
 
 ```bash
