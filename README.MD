@@ -2,10 +2,6 @@
   <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
 </p>
 
-<p align="center">
-  <img src="https://github.com/Raezil/GoEventBus/blob/main/logoGoEventBus.png?raw=true">
-</p>
-
 # GoEventBus
 
 A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pipelines, microservices, and game loops.  
