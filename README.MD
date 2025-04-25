@@ -187,7 +187,7 @@ func (es *EventStore) Metrics() (published, processed, errors uint64)
 ```
 Returns the total count of published, processed, and errored events.
 
-+ ## Back-pressure and Overrun Policies
+## Back-pressure and Overrun Policies
 GoEventBus provides three strategies for handling a saturated ring buffer:
 
 | Policy       | Behaviour                                                                                     | When to use                                  |
