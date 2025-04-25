@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -52,6 +53,13 @@ type Event struct {
 	ID         string
 	Projection interface{}
 	Args       map[string]any
+	Ctx        context.Context // carried context from Subscribe
+}
+
+// internal work unit for async dispatch
+type eventWork struct {
+	handler HandlerFunc
+	ev      Event
 }
 
 // EventStore is a high-performance, lock-free ring buffer with middleware and hooks support.
@@ -75,23 +83,46 @@ type EventStore struct {
 	afterHooks  []AfterHook
 	errorHooks  []ErrorHook
 
+	// Async worker pool
+	asyncWorkers   int
+	workCh         chan eventWork
+	wg             sync.WaitGroup
+	shutdownOnce   sync.Once
+	shutdownSignal chan struct{}
+
 	// Counters
 	publishedCount uint64
 	processedCount uint64
 	errorCount     uint64
 }
 
-// NewEventStore initializes a new EventStore.
+// NewEventStore initializes a new EventStore. It spins up a default worker pool.
 func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy) *EventStore {
 	if bufferSize&(bufferSize-1) != 0 {
 		panic("bufferSize must be a power of two")
 	}
-	return &EventStore{
-		dispatcher:    dispatcher,
-		size:          bufferSize,
-		buf:           make([]unsafe.Pointer, bufferSize),
-		events:        make([]Event, bufferSize),
-		OverrunPolicy: policy,
+	es := &EventStore{
+		dispatcher:     dispatcher,
+		size:           bufferSize,
+		buf:            make([]unsafe.Pointer, bufferSize),
+		events:         make([]Event, bufferSize),
+		OverrunPolicy:  policy,
+		asyncWorkers:   runtime.NumCPU(),
+		workCh:         make(chan eventWork, bufferSize),
+		shutdownSignal: make(chan struct{}),
+	}
+	// start worker pool
+	for i := 0; i < es.asyncWorkers; i++ {
+		go es.worker()
+	}
+	return es
+}
+
+// worker processes eventWork from the channel until shutdown.
+func (es *EventStore) worker() {
+	for w := range es.workCh {
+		es.execute(w.handler, w.ev)
+		es.wg.Done()
 	}
 }
 
@@ -117,11 +148,12 @@ func (es *EventStore) OnError(hook ErrorHook) {
 
 // Subscribe enqueues an Event, applying back-pressure according to OverrunPolicy.
 func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
+	// record caller context
+	e.Ctx = ctx
 	for {
 		head := atomic.LoadUint64(&es.head)
 		tail := atomic.LoadUint64(&es.tail)
 		if head-tail < es.size {
-			// we have space
 			idx := atomic.AddUint64(&es.head, 1) - 1
 			slot := idx & (es.size - 1)
 			ev := &es.events[slot]
@@ -130,7 +162,6 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 			atomic.AddUint64(&es.publishedCount, 1)
 			return nil
 		}
-
 		// buffer full – resolve based on policy
 		switch es.OverrunPolicy {
 		case DropOldest:
@@ -154,7 +185,7 @@ func (es *EventStore) Publish() {
 	head := atomic.LoadUint64(&es.head)
 	tail := atomic.LoadUint64(&es.tail)
 	if tail == head {
-		return // no new events
+		return
 	}
 
 	disp := *es.dispatcher
@@ -168,8 +199,12 @@ func (es *EventStore) Publish() {
 		ev := *(*Event)(p)
 		if handler, ok := disp[ev.Projection]; ok {
 			if es.Async {
-				// fire-and-forget
-				go es.execute(handler, ev)
+				es.wg.Add(1)
+				select {
+				case es.workCh <- eventWork{handler, ev}:
+				case <-es.shutdownSignal:
+					es.wg.Done()
+				}
 			} else {
 				es.execute(handler, ev)
 			}
@@ -180,38 +215,53 @@ func (es *EventStore) Publish() {
 
 // execute runs the handler with middleware and hooks.
 func (es *EventStore) execute(h HandlerFunc, ev Event) {
-	// establish context
-	ctx := context.Background()
+	// pick up recorded context
+	ctx := ev.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// override with explicit __ctx if set
 	if c, ok := ev.Args["__ctx"].(context.Context); ok && c != nil {
 		ctx = c
 	}
 
-	// Before hooks
 	for _, hook := range es.beforeHooks {
 		hook(ctx, ev)
 	}
-
-	// apply middleware chain
 	wrapped := h
 	for i := len(es.middlewares) - 1; i >= 0; i-- {
 		wrapped = es.middlewares[i](wrapped)
 	}
-
-	// invoke handler
 	res, err := wrapped(ctx, ev.Args)
 	atomic.AddUint64(&es.processedCount, 1)
 
-	// After hooks
 	for _, hook := range es.afterHooks {
 		hook(ctx, ev, res, err)
 	}
-
-	// Error hooks and count
 	if err != nil {
 		atomic.AddUint64(&es.errorCount, 1)
 		for _, hook := range es.errorHooks {
 			hook(ctx, ev, err)
 		}
+	}
+}
+
+// Drain waits for all in-flight async handlers to complete, stopping new dispatch.
+func (es *EventStore) Drain(ctx context.Context) error {
+	es.shutdownOnce.Do(func() {
+		close(es.shutdownSignal)
+		close(es.workCh)
+	})
+	done := make(chan struct{})
+	go func() {
+		es.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
