@@ -147,11 +147,16 @@ func (es *EventStore) Metrics() (published, processed, errors uint64)
 ```
 Returns the total count of published, processed, and errored events.
 
-#### 💡 Use Cases
-- Real-time event processing in high-throughput systems
-- Background job orchestration
-- Metrics/event auditing pipelines
-- Async task scheduling (with optional sync fallback)
+### 💡 Use Cases
+
+GoEventBus is ideal for scenarios where low-latency, high-throughput, and non-blocking event dispatching is needed:
+
+- 🔄 Real-time event pipelines (e.g. analytics, telemetry)
+- 📥 Background task execution or job queues
+- 🧩 Microservice communication using in-process events
+- ⚙️ Observability/event sourcing in domain-driven designs
+- 🔁 In-memory pub/sub for small-scale distributed systems
+- 🎮 Game loops or simulations requiring lock-free dispatching
 
 ## Benchmarks
 
