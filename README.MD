@@ -3,9 +3,14 @@
 </p>
 
 # GoEventBus
-[![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](https://goreportcard.com/report/github.com/Raezil/GoEventBus)
 
-A lightweight, lock-free, in-memory event bus for Go applications. GoEventBus allows publishers to emit events and subscribers to handle those events asynchronously in a high-performance ring buffer.
+A blazing-fast, in-memory, lock-free event bus for Go—ideal for low-latency pipelines, microservices, and game loops.  
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](...)
+[![CI](https://github.com/Raezil/GoEventBus/actions/workflows/ci.yml/badge.svg)](...)
+[![Coverage](https://img.shields.io/codecov/c/github/Raezil/GoEventBus.svg)](...)
+[![GoDoc](https://pkg.go.dev/badge/github.com/Raezil/GoEventBus)](...)
+[![Release](https://img.shields.io/github/v/release/Raezil/GoEventBus.svg)](...)
 
 ## 📚 Table of Contents
 - [Features](#features)
