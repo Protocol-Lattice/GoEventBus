@@ -23,8 +23,7 @@ func TestSubscribeAndPublish(t *testing.T) {
 		return Result{Message: "ok2"}, nil
 	}
 
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	es.Subscribe(Event{ID: "1", Projection: "evt1", Args: nil})
 	es.Subscribe(Event{ID: "2", Projection: "evt2", Args: nil})
 
@@ -41,8 +40,7 @@ func TestSubscribeAndPublish(t *testing.T) {
 // TestPublishWithMissingHandler ensures no panic when a handler is missing.
 func TestPublishWithMissingHandler(t *testing.T) {
 	dispatcher := Dispatcher{}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Subscribe an event with no matching handler
 	es.Subscribe(Event{ID: "3", Projection: "unknown", Args: nil})
 
@@ -58,8 +56,7 @@ func TestPublishMixedExistingAndNonExisting(t *testing.T) {
 		atomic.AddInt32(&called, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Subscribe one existing and one non-existing projection
 	es.Subscribe(Event{ID: "1", Projection: "evt", Args: nil})
 	es.Subscribe(Event{ID: "2", Projection: "noexist", Args: nil})
@@ -80,8 +77,7 @@ func TestOverflowBehavior(t *testing.T) {
 		atomic.AddUint64(&count, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Enqueue size + 100 events to overflow
 	for i := 0; i < size+100; i++ {
 		es.Subscribe(Event{ID: "o", Projection: "evtOverflow", Args: nil})
@@ -101,8 +97,7 @@ func TestConcurrentSubscribe(t *testing.T) {
 		atomic.AddUint64(&count, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	var wg sync.WaitGroup
 	const n = 1000
 	wg.Add(n)
@@ -123,8 +118,7 @@ func TestConcurrentSubscribe(t *testing.T) {
 // Benchmarks
 func BenchmarkSubscribe(b *testing.B) {
 	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		es.Subscribe(Event{ID: "bench", Projection: "evt", Args: nil})
@@ -133,8 +127,7 @@ func BenchmarkSubscribe(b *testing.B) {
 
 func BenchmarkSubscribeParallel(b *testing.B) {
 	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			es.Subscribe(Event{ID: "pp", Projection: "evt", Args: nil})
@@ -144,8 +137,7 @@ func BenchmarkSubscribeParallel(b *testing.B) {
 
 func BenchmarkPublish(b *testing.B) {
 	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Pre-fill buffer with events
 	for i := 0; i < size; i++ {
 		es.Subscribe(Event{ID: "p", Projection: "evt", Args: nil})
@@ -159,8 +151,7 @@ func BenchmarkPublish(b *testing.B) {
 
 func BenchmarkPublishAfterPrefill(b *testing.B) {
 	dispatcher := Dispatcher{"evt": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Pre-fill buffer with events
 	for i := 0; i < size; i++ {
 		es.Subscribe(Event{ID: "pp", Projection: "evt", Args: nil})
@@ -179,7 +170,7 @@ type LargeStruct struct {
 
 func BenchmarkSubscribeLargePayload(b *testing.B) {
 	dispatcher := Dispatcher{"evtLarge": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 	var payload LargeStruct
 
 	b.ResetTimer()
@@ -190,7 +181,7 @@ func BenchmarkSubscribeLargePayload(b *testing.B) {
 
 func BenchmarkPublishLargePayload(b *testing.B) {
 	dispatcher := Dispatcher{"evtLarge": func(args map[string]any) (Result, error) { return Result{}, nil }}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 	var payload LargeStruct
 
 	// Pre-fill buffer
@@ -214,8 +205,7 @@ func TestExactBufferSizeNoOverflow(t *testing.T) {
 		atomic.AddUint64(&count, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	for i := 0; i < size; i++ {
 		es.Subscribe(Event{ID: strconv.Itoa(i), Projection: "evtExact", Args: nil})
 	}
@@ -235,8 +225,7 @@ func TestOverflowThreshold(t *testing.T) {
 		atomic.AddUint64(&count, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	for i := 0; i < size+1; i++ {
 		es.Subscribe(Event{ID: strconv.Itoa(i), Projection: "evtThresh", Args: nil})
 	}
@@ -256,8 +245,7 @@ func TestPublishIdempotent(t *testing.T) {
 		atomic.AddInt32(&called, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	es.Subscribe(Event{ID: "1", Projection: "evtOnce", Args: nil})
 	es.Publish()
 	es.Publish() // should return immediately, not call handler again
@@ -280,7 +268,7 @@ func TestEventStore_AsyncDispatch(t *testing.T) {
 		},
 	}
 
-	store := NewEventStore(&dispatcher)
+	store := NewEventStore(&dispatcher, 1<<16)
 	store.Async = true
 
 	for i := 0; i < 10; i++ {
@@ -309,7 +297,7 @@ func BenchmarkEventStore_Async(b *testing.B) {
 		},
 	}
 
-	store := NewEventStore(&dispatcher)
+	store := NewEventStore(&dispatcher, 1<<16)
 	store.Async = true
 
 	for i := 0; i < b.N; i++ {
@@ -329,7 +317,7 @@ func BenchmarkEventStore_Sync(b *testing.B) {
 		},
 	}
 
-	store := NewEventStore(&dispatcher)
+	store := NewEventStore(&dispatcher, 1<<16)
 	store.Async = false
 
 	for i := 0; i < b.N; i++ {
@@ -350,7 +338,7 @@ func benchmarkFastHTTP(b *testing.B, async bool) {
 			return Result{}, nil
 		},
 	}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 	es.Async = async
 
 	// our “handler”
@@ -379,7 +367,7 @@ func BenchmarkFastHTTPParallel(b *testing.B) {
 	dispatcher := Dispatcher{
 		"evt": func(args map[string]any) (Result, error) { return Result{}, nil },
 	}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 	es.Async = true
 
 	handler := func(ctx *fasthttp.RequestCtx) {
@@ -399,7 +387,7 @@ func BenchmarkFastHTTPParallel(b *testing.B) {
 func TestPublishEmpty(t *testing.T) {
 	// Create a dispatcher and event store
 	dispatcher := Dispatcher{}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 
 	// Capture the initial head and tail values
 	initialHead := es.head
@@ -431,7 +419,7 @@ func TestArgsPassing(t *testing.T) {
 		received = args["foo"].(string)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Subscribe an event with a specific argument
 	args := map[string]any{"foo": "bar"}
 	es.Subscribe(Event{ID: "1", Projection: "echo", Args: args})
@@ -451,8 +439,7 @@ func TestDispatcherSnapshot(t *testing.T) {
 		atomic.AddInt32(&calledOriginal, 1)
 		return Result{}, nil
 	}
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	// Replace the handler before publishing
 	dispatcher["snap"] = func(args map[string]any) (Result, error) {
 		atomic.AddInt32(&calledModified, 1)
@@ -478,8 +465,7 @@ func TestEventStore_Metrics(t *testing.T) {
 		},
 	}
 
-	es := NewEventStore(&dispatcher)
-
+	es := NewEventStore(&dispatcher, 1<<16)
 	es.Subscribe(Event{ID: "1", Projection: "metric", Args: nil})
 	es.Subscribe(Event{ID: "2", Projection: "metric", Args: nil})
 

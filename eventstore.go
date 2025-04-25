@@ -28,26 +28,32 @@ type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
 
 // EventStore is a high-performance, lock-free ring buffer using atomic pointer ops.
 type EventStore struct {
-	dispatcher *Dispatcher          // handler registry (read-only)
-	buf        [size]unsafe.Pointer // each element is *Event
-	events     []Event              // pre-allocated event slots
-	_          pad                  // pad to full cache line
-	head       uint64               // atomic write index
-	_          pad                  // pad again
-	tail       uint64               // atomic read index
-	Async      bool                 // dispatch async if true
+	dispatcher *Dispatcher
+	size       uint64
+	buf        []unsafe.Pointer
+	events     []Event
+	_          pad
+	head       uint64
+	_          pad
+	tail       uint64
+	Async      bool
 
-	// Metrics
 	publishedCount uint64
 	processedCount uint64
 	errorCount     uint64
 }
 
 // NewEventStore initializes a new EventStore with the given dispatcher.
-func NewEventStore(dispatcher *Dispatcher) *EventStore {
+func NewEventStore(dispatcher *Dispatcher, bufferSize uint64) *EventStore {
+	// bufferSize must be a power of two
+	if bufferSize&(bufferSize-1) != 0 {
+		panic("bufferSize must be a power of two")
+	}
 	return &EventStore{
 		dispatcher: dispatcher,
-		events:     make([]Event, size),
+		size:       bufferSize,
+		buf:        make([]unsafe.Pointer, bufferSize),
+		events:     make([]Event, bufferSize),
 	}
 }
 
@@ -56,8 +62,7 @@ func (es *EventStore) Subscribe(e Event) {
 	atomic.AddUint64(&es.publishedCount, 1)
 
 	idx := atomic.AddUint64(&es.head, 1) - 1
-	slot := idx & (size - 1)
-
+	slot := idx & (es.size - 1)
 	// copy into the existing slot—no heap allocation
 	ev := &es.events[slot]
 	*ev = e
@@ -74,12 +79,12 @@ func (es *EventStore) Publish() {
 		return // no new events
 	}
 	// drop oldest if buffer overrun
-	if head-tail > size {
-		tail = head - size
+	if head-tail > es.size {
+		tail = head - es.size
 	}
 
 	disp := *es.dispatcher
-	mask := uint64(size - 1)
+	mask := es.size - 1
 
 	for i := tail; i < head; i++ {
 		p := atomic.LoadPointer(&es.buf[i&mask])
