@@ -141,6 +141,7 @@ func main() {
 		Projection: "send_email",
 		Args:       map[string]any{"template": "welcome", "userID": "12345"},
 	})
+	tx.Rollback()
 
 	// Commit the transaction atomically
 	if err := tx.Commit(context.Background()); err != nil {
@@ -148,7 +149,6 @@ func main() {
 	}
 
 	// Alternatively, to discard buffered events without publishing:
-	tx.Rollback()
 }
 ```
 
