@@ -180,6 +180,13 @@ func (es *EventStore) Publish()
 ```
 Dispatches all events from the last published position to the current head. If `Async` is true, handlers run in separate goroutines; otherwise they run in the caller's goroutine.
 
+#### `Close`
+
+```go
+func (es *EventStore) Close(ctx context.Context) error
+```
+Drains all pending asynchronous handlers and shuts down the EventStore. Blocks until all in-flight handlers complete or the provided context.Context is canceled. Returns an error if the context’s deadline is exceeded or it is otherwise canceled.
+
 #### `Metrics`
 
 ```go
