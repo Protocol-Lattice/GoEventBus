@@ -103,36 +103,52 @@ func main() {
 GoEventBus now supports atomic transactions, allowing you to group multiple events and commit them together. This ensures that either all events are successfully published and handled, or none are.
 
 ```go
-import (
-    "context"
-    "log"
+package main
 
-    "github.com/Raezil/GoEventBus"
+import (
+	"context"
+	"log"
+
+	"github.com/Raezil/GoEventBus"
 )
 
-func transactionalExample() {
-    // Begin a new transaction on the existing EventStore
-    tx := store.BeginTransaction()
+func main() {
+	// Begin a new transaction on the existing EventStore
 
-    // Buffer multiple events
-    tx.Publish(GoEventBus.Event{
-        ID:         "evtA",
-        Projection: "user_created",
-        Args:       map[string]any{"id": "12345"},
-    })
-    tx.Publish(GoEventBus.Event{
-        ID:         "evtB",
-        Projection: "send_email",
-        Args:       map[string]any{"template": "welcome", "userID": "12345"},
-    })
+	// Create a dispatcher mapping projections to handlers
+	dispatcher := GoEventBus.Dispatcher{
+		"user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+			return GoEventBus.Result{Message: "handled user_created"}, nil
+		},
+		"send_email": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+			log.Println("Hello")
+			return GoEventBus.Result{Message: "handled send_email"}, nil
+		},
+	}
 
-    // Commit the transaction atomically
-    if err := tx.Commit(context.Background()); err != nil {
-        log.Fatalf("transaction failed: %v", err)
-    }
+	// Initialise an EventStore with a 64K ring buffer and DropOldest policy
+	store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)
+	tx := store.BeginTransaction()
 
-    // Alternatively, to discard buffered events without publishing:
-    // tx.Rollback()
+	// Buffer multiple events
+	tx.Publish(GoEventBus.Event{
+		ID:         "evtA",
+		Projection: "user_created",
+		Args:       map[string]any{"id": "12345"},
+	})
+	tx.Publish(GoEventBus.Event{
+		ID:         "evtB",
+		Projection: "send_email",
+		Args:       map[string]any{"template": "welcome", "userID": "12345"},
+	})
+
+	// Commit the transaction atomically
+	if err := tx.Commit(context.Background()); err != nil {
+		log.Fatalf("transaction failed: %v", err)
+	}
+
+	// Alternatively, to discard buffered events without publishing:
+	tx.Rollback()
 }
 ```
 
