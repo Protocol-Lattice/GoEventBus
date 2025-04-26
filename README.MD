@@ -185,6 +185,8 @@ type Event struct {
 type Transaction struct {
     store  *EventStore
     events []Event
+    startHead uint64 // head position when transaction began
+
 }
 ```
 
