@@ -147,8 +147,6 @@ func main() {
 	if err := tx.Commit(context.Background()); err != nil {
 		log.Fatalf("transaction failed: %v", err)
 	}
-
-	// Alternatively, to discard buffered events without publishing:
 }
 ```
 
