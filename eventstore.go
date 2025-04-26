@@ -265,6 +265,11 @@ func (es *EventStore) Drain(ctx context.Context) error {
 	}
 }
 
+// Close drains all pending async events and shuts down the EventStore.
+func (es *EventStore) Close(ctx context.Context) error {
+	return es.Drain(ctx)
+}
+
 // Metrics returns snapshot counters.
 func (es *EventStore) Metrics() (published, processed, errors uint64) {
 	return atomic.LoadUint64(&es.publishedCount),
