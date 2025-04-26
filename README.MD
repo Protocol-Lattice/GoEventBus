@@ -13,6 +13,7 @@ A blazing‑fast, in‑memory, lock‑free event bus for Go—ideal for low‑la
 - [Why GoEventBus?](#why-goeventbus)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Transactions](#transactions)
 - [API Reference](#api-reference)
 - [Back-pressure and Overrun Policies](#back-pressure-and-overrun-policies)
 - [Use Cases](#-use-cases)
@@ -93,8 +94,45 @@ func main() {
 
     // Retrieve metrics
     published, processed, errors := store.Metrics()
-    fmt.Printf("published=%d processed=%d errors=%d
-", published, processed, errors)
+    fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
+}
+```
+
+## Transactions
+
+GoEventBus now supports atomic transactions, allowing you to group multiple events and commit them together. This ensures that either all events are successfully published and handled, or none are.
+
+```go
+import (
+    "context"
+    "log"
+
+    "github.com/Raezil/GoEventBus"
+)
+
+func transactionalExample() {
+    // Begin a new transaction on the existing EventStore
+    tx := store.BeginTransaction()
+
+    // Buffer multiple events
+    tx.Publish(GoEventBus.Event{
+        ID:         "evtA",
+        Projection: "user_created",
+        Args:       map[string]any{"id": "12345"},
+    })
+    tx.Publish(GoEventBus.Event{
+        ID:         "evtB",
+        Projection: "send_email",
+        Args:       map[string]any{"template": "welcome", "userID": "12345"},
+    })
+
+    // Commit the transaction atomically
+    if err := tx.Commit(context.Background()); err != nil {
+        log.Fatalf("transaction failed: %v", err)
+    }
+
+    // Alternatively, to discard buffered events without publishing:
+    // tx.Rollback()
 }
 ```
 
@@ -124,6 +162,20 @@ type Event struct {
     Args       map[string]any  // Payload data for the event
 }
 ```
+
+### `type Transaction`
+
+```go
+type Transaction struct {
+    store  *EventStore
+    events []Event
+}
+```
+
+- `BeginTransaction() *Transaction`: Start a new transaction.
+- `Publish(e Event)`: Buffer an event within the transaction.
+- `Commit(ctx context.Context) error`: Atomically enqueue and process all buffered events, returning on the first error.
+- `Rollback()`: Discard buffered events without publishing.
 
 ### `type OverrunPolicy`
 
@@ -202,6 +254,7 @@ func (es *EventStore) Metrics() (published, processed, errors uint64)
 Returns the total count of published, processed, and errored events.
 
 ## Back-pressure and Overrun Policies
+
 GoEventBus provides three strategies for handling a saturated ring buffer:
 
 | Policy       | Behaviour                                                                                     | When to use                                  |
@@ -248,3 +301,4 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
+
