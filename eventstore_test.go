@@ -674,3 +674,52 @@ func TestEventStore_Hooks(t *testing.T) {
 		t.Error("Error hook not called")
 	}
 }
+
+func TestEventStore_SubscribePublishDrainMetrics(t *testing.T) {
+	var processed atomic.Uint64
+	dispatcher := Dispatcher{
+		"testEvent": func(ctx context.Context, args map[string]any) (Result, error) {
+			processed.Add(1)
+			return Result{Message: "ok"}, nil
+		},
+	}
+	store := NewEventStore(&dispatcher, 16, DropOldest)
+	store.Async = true
+
+	// Subscribe multiple events
+	for i := 0; i < 5; i++ {
+		err := store.Subscribe(context.Background(), Event{
+			ID:         "evt" + strconv.Itoa(i),
+			Projection: "testEvent",
+			Args:       nil,
+		})
+		if err != nil {
+			t.Fatalf("Subscribe failed: %v", err)
+		}
+	}
+
+	// Check metrics after Subscribe
+	published, processedCount, errorCount := store.Metrics()
+	if published != 5 || processedCount != 0 || errorCount != 0 {
+		t.Errorf("after subscribe: published=%d processed=%d errors=%d", published, processedCount, errorCount)
+	}
+
+	// Publish events
+	store.Publish()
+
+	// Drain to wait for async handlers to finish
+	if err := store.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain failed: %v", err)
+	}
+
+	// Check final metrics
+	published, processedCount, errorCount = store.Metrics()
+	if published != 5 || processedCount != 5 || errorCount != 0 {
+		t.Errorf("after drain: published=%d processed=%d errors=%d", published, processedCount, errorCount)
+	}
+
+	// Check processed counter
+	if processed.Load() != 5 {
+		t.Errorf("expected 5 events processed, got %d", processed.Load())
+	}
+}
