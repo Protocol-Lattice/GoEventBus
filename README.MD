@@ -60,57 +60,63 @@ go get github.com/Raezil/GoEventBus
 package main
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
+	"log"
 
-    "github.com/Raezil/GoEventBus"
+	"github.com/Raezil/GoEventBus"
 )
 
 // Define a typed projection as a struct
 type HouseWasSold struct{}
 
 func main() {
-    // Create a dispatcher mapping projections (string or struct) to handlers
-    dispatcher := GoEventBus.Dispatcher{
-        "user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-            userID := args["id"].(string)
-            fmt.Println("User created with ID:", userID)
-            return GoEventBus.Result{Message: "handled user_created"}, nil
-        },
-        HouseWasSold{}: func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-            address := args["address"].(string)
-            price := args["price"].(int)
-            fmt.Printf("House sold at %s for $%d\n", address, price)
-            return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
-        },
-    }
+	// Create a dispatcher mapping projections (string or struct) to handlers
+	dispatcher := GoEventBus.Dispatcher{
+		"user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+			userID := args["id"].(string)
+			fmt.Println("User created with ID:", userID)
+			return GoEventBus.Result{Message: "handled user_created"}, nil
+		},
+		HouseWasSold{}: func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+			address := args["address"].(string)
+			price := args["price"].(int)
+			fmt.Printf("House sold at %s for $%d\n", address, price)
+			return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
+		},
+	}
 
-    // Initialise an EventStore with a 64K ring buffer and DropOldest overrun policy
-    store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)
+	// Initialise an EventStore with a 64K ring buffer and DropOldest overrun policy
+	store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)
 
-    // Optionally run handlers asynchronously
-    store.Async = true
+	// Enable asynchronous processing
+	store.Async = true
 
-    // Enqueue a string-based event
-    _ = store.Subscribe(context.Background(), GoEventBus.Event{
-        ID:         "evt1",
-        Projection: "user_created",
-        Args:       map[string]any{"id": "12345"},
-    })
+	// Enqueue a string-based event
+	_ = store.Subscribe(context.Background(), GoEventBus.Event{
+		ID:         "evt1",
+		Projection: "user_created",
+		Args:       map[string]any{"id": "12345"},
+	})
 
-    // Enqueue a struct-based event
-    _ = store.Subscribe(context.Background(), GoEventBus.Event{
-        ID:         "evt2",
-        Projection: HouseWasSold{},
-        Args:       map[string]any{"address": "123 Main St", "price": 500000},
-    })
+	// Enqueue a struct-based event
+	_ = store.Subscribe(context.Background(), GoEventBus.Event{
+		ID:         "evt2",
+		Projection: HouseWasSold{},
+		Args:       map[string]any{"address": "123 Main St", "price": 500000},
+	})
 
-    // Process pending events
-    store.Publish()
+	// Process pending events
+	store.Publish()
 
-    // Retrieve metrics
-    published, processed, errors := store.Metrics()
-    fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
+	// Wait for all async handlers to finish
+	if err := store.Drain(context.Background()); err != nil {
+		log.Fatalf("Failed to drain EventStore: %v", err)
+	}
+
+	// Retrieve metrics
+	published, processed, errors := store.Metrics()
+	fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
 }
 ```
 
