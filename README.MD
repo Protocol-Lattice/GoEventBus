@@ -66,13 +66,22 @@ import (
     "github.com/Raezil/GoEventBus"
 )
 
+// Define a typed projection as a struct
+type HouseWasSold struct{}
+
 func main() {
-    // Create a dispatcher mapping projections to context‑aware handlers
+    // Create a dispatcher mapping projections (string or struct) to handlers
     dispatcher := GoEventBus.Dispatcher{
         "user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
             userID := args["id"].(string)
             fmt.Println("User created with ID:", userID)
             return GoEventBus.Result{Message: "handled user_created"}, nil
+        },
+        HouseWasSold{}: func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+            address := args["address"].(string)
+            price := args["price"].(int)
+            fmt.Printf("House sold at %s for $%d\n", address, price)
+            return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
         },
     }
 
@@ -82,11 +91,18 @@ func main() {
     // Optionally run handlers asynchronously
     store.Async = true
 
-    // Enqueue an event (always pass a context)
+    // Enqueue a string-based event
     _ = store.Subscribe(context.Background(), GoEventBus.Event{
         ID:         "evt1",
         Projection: "user_created",
         Args:       map[string]any{"id": "12345"},
+    })
+
+    // Enqueue a struct-based event
+    _ = store.Subscribe(context.Background(), GoEventBus.Event{
+        ID:         "evt2",
+        Projection: HouseWasSold{},
+        Args:       map[string]any{"address": "123 Main St", "price": 500000},
     })
 
     // Process pending events
