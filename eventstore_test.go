@@ -723,3 +723,52 @@ func TestEventStore_SubscribePublishDrainMetrics(t *testing.T) {
 		t.Errorf("expected 5 events processed, got %d", processed.Load())
 	}
 }
+
+// noOpHandler is a dummy handler for benchmarks.
+func noOpHandler(ctx context.Context, args map[string]any) (Result, error) {
+	return Result{}, nil
+}
+
+// setupEventStore initializes an EventStore with the given async flag and buffer size.
+func setupEventStore(async bool, bufferSize uint64) *EventStore {
+	disp := Dispatcher{"test": noOpHandler}
+	es := NewEventStore(&disp, bufferSize, DropOldest)
+	es.Async = async
+	return es
+}
+
+// BenchmarkDrainSync measures the performance of Drain on a synchronous EventStore.
+func BenchmarkDrainSync(b *testing.B) {
+	// Prepare a store with a batch of events
+	es := setupEventStore(false, 1024)
+	for i := 0; i < 1000; i++ {
+		es.Subscribe(context.Background(), Event{Projection: "test", Args: map[string]any{}})
+	}
+	es.Publish()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// In sync mode, Drain should return immediately (no-op)
+		es.Drain(context.Background())
+	}
+}
+
+// BenchmarkDrainAsync measures the performance of Drain on an asynchronous EventStore.
+// It uses StopTimer/StartTimer to exclude setup work (subscribe and publish) from timing.
+func BenchmarkDrainAsync(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		// Setup a fresh async store
+		es := setupEventStore(true, 1024)
+
+		// Enqueue events and publish outside timed section
+		b.StopTimer()
+		for j := 0; j < 1000; j++ {
+			es.Subscribe(context.Background(), Event{Projection: "test", Args: map[string]any{}})
+		}
+		es.Publish()
+
+		// Time only the Drain call
+		b.StartTimer()
+		es.Drain(context.Background())
+	}
+}
