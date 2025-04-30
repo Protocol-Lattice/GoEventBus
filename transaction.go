@@ -42,11 +42,12 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 	mask := tx.store.size - 1
 
 	for i := tail; i < head; i++ {
-		ptr := atomic.LoadPointer(&tx.store.buf[i&mask])
-		if ptr == nil {
+		// load event pointer atomically
+		evPtr := tx.store.buf[i&mask].Load()
+		if evPtr == nil {
 			continue
 		}
-		ev := *(*Event)(ptr)
+		ev := *evPtr
 		if handler, ok := disp[ev.Projection]; ok {
 			// pick up recorded context
 			cctx := ev.Ctx
@@ -104,7 +105,8 @@ func (tx *Transaction) Rollback() {
 	currHead := atomic.LoadUint64(&tx.store.head)
 	mask := tx.store.size - 1
 	for i := tx.startHead; i < currHead; i++ {
-		atomic.StorePointer(&tx.store.buf[i&mask], nil)
+		// clear slot atomically
+		tx.store.buf[i&mask].Store(nil)
 	}
 
 	// restore the head pointer

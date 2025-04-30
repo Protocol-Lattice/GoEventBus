@@ -66,7 +66,7 @@ type eventWork struct {
 type EventStore struct {
 	dispatcher *Dispatcher
 	size       uint64
-	buf        []unsafe.Pointer // holds *Event
+	buf        []atomic.Pointer[Event] // holds *Event pointers safely
 	events     []Event
 	_          pad
 	head       uint64 // write index
@@ -104,7 +104,7 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 	es := &EventStore{
 		dispatcher:     dispatcher,
 		size:           bufferSize,
-		buf:            make([]unsafe.Pointer, bufferSize),
+		buf:            make([]atomic.Pointer[Event], bufferSize),
 		events:         make([]Event, bufferSize),
 		OverrunPolicy:  policy,
 		asyncWorkers:   runtime.NumCPU(),
@@ -156,9 +156,9 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 		if head-tail < es.size {
 			idx := atomic.AddUint64(&es.head, 1) - 1
 			slot := idx & (es.size - 1)
-			ev := &es.events[slot]
-			*ev = e
-			atomic.StorePointer(&es.buf[slot], unsafe.Pointer(ev))
+			evPtr := &es.events[slot]
+			*evPtr = e
+			es.buf[slot].Store(evPtr)
 			atomic.AddUint64(&es.publishedCount, 1)
 			return nil
 		}
@@ -192,11 +192,11 @@ func (es *EventStore) Publish() {
 	mask := es.size - 1
 
 	for i := tail; i < head; i++ {
-		p := atomic.LoadPointer(&es.buf[i&mask])
+		p := es.buf[i&mask].Load()
 		if p == nil {
 			continue
 		}
-		ev := *(*Event)(p)
+		ev := *p
 		if handler, ok := disp[ev.Projection]; ok {
 			if es.Async {
 				es.wg.Add(1)
