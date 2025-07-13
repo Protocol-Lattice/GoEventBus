@@ -296,6 +296,7 @@ Returns the total count of published, processed, and errored events.
 ```go
 func (es *EventStore) Schedule(ctx context.Context, t time.Time, e Event) *time.Timer
 ```
+
 Schedules an Event to be subscribed and published at a specific time t.
 
     - [x] If t is in the future, the function returns a *time.Timer that can be used to cancel the event before it fires by using timer.Stop().
@@ -306,6 +307,7 @@ Schedules an Event to be subscribed and published at a specific time t.
 ```go
 func (es *EventStore) ScheduleAfter(ctx context.Context, d time.Duration, e Event) *time.Timer
 ```
+
 A convenience wrapper around Schedule that fires an event after a specified duration d.
 
     - [x] If the duration d is greater than zero, it returns a cancellable *time.Timer.
