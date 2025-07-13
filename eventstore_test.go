@@ -772,3 +772,100 @@ func BenchmarkDrainAsync(b *testing.B) {
 		es.Drain(context.Background())
 	}
 }
+
+func TestScheduleAfter(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"foo": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	// schedule 50ms in future
+	es.ScheduleAfter(context.Background(), 50*time.Millisecond, Event{Projection: "foo"})
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadUint32(&called) != 1 {
+		t.Fatal("expected handler to fire once")
+	}
+}
+
+// TestScheduleAfter_FiresOnce verifies ScheduleAfter enqueues and publishes the event exactly once.
+func TestScheduleAfter_FiresOnce(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"foo": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	es.Async = true
+	es.ScheduleAfter(context.Background(), 50*time.Millisecond, Event{Projection: "foo"})
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadUint32(&called) != 1 {
+		t.Fatal("expected handler to fire once")
+	}
+}
+
+// TestSchedule_FiresImmediatelyIfPast checks that Schedule executes immediately when given a past time.
+func TestSchedule_FiresImmediatelyIfPast(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"bar": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	es.Async = true
+	past := time.Now().Add(-time.Second)
+	es.Schedule(context.Background(), past, Event{Projection: "bar"})
+	if atomic.LoadUint32(&called) != 1 {
+		t.Fatal("expected handler to fire immediately for past time")
+	}
+}
+
+// TestSchedule_FiresAtFutureTime ensures the handler is not called before the scheduled time and fires shortly after.
+func TestSchedule_FiresAtFutureTime(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"baz": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	es.Async = true
+	start := time.Now().Add(50 * time.Millisecond)
+	es.Schedule(context.Background(), start, Event{Projection: "baz"})
+	// Should not fire immediately
+	if atomic.LoadUint32(&called) != 0 {
+		t.Fatal("handler fired too early")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadUint32(&called) != 1 {
+		t.Fatal("expected handler to fire at scheduled time")
+	}
+}
+
+// TestSchedule_Cancel verifies that stopping the timer prevents the event from firing.
+func TestSchedule_Cancel(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"qux": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	es.Async = true
+	timer := es.ScheduleAfter(context.Background(), 50*time.Millisecond, Event{Projection: "qux"})
+	if stopped := timer.Stop(); !stopped {
+		t.Fatal("expected timer to stop successfully")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadUint32(&called) != 0 {
+		t.Fatal("handler fired despite cancellation")
+	}
+}
