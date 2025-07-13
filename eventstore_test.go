@@ -772,3 +772,20 @@ func BenchmarkDrainAsync(b *testing.B) {
 		es.Drain(context.Background())
 	}
 }
+
+func TestScheduleAfter(t *testing.T) {
+	var called uint32
+	dispatcher := Dispatcher{
+		"foo": func(ctx context.Context, args map[string]any) (Result, error) {
+			atomic.StoreUint32(&called, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&dispatcher, 8, DropOldest)
+	// schedule 50ms in future
+	es.ScheduleAfter(context.Background(), 50*time.Millisecond, Event{Projection: "foo"})
+	time.Sleep(100 * time.Millisecond)
+	if atomic.LoadUint32(&called) != 1 {
+		t.Fatal("expected handler to fire once")
+	}
+}

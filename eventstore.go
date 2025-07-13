@@ -276,3 +276,29 @@ func (es *EventStore) Metrics() (published, processed, errors uint64) {
 		atomic.LoadUint64(&es.processedCount),
 		atomic.LoadUint64(&es.errorCount)
 }
+
+// Schedule fires e at the absolute time t.
+// If t is in the past or now, it enqueues & publishes immediately.
+func (es *EventStore) Schedule(ctx context.Context, t time.Time, e Event) *time.Timer {
+	delay := time.Until(t)
+	if delay <= 0 {
+		_ = es.Subscribe(ctx, e)
+		es.Publish()
+		return nil
+	}
+	return time.AfterFunc(delay, func() {
+		_ = es.Subscribe(ctx, e)
+		es.Publish()
+	})
+}
+
+// ScheduleAfter fires e after the given duration d.
+func (es *EventStore) ScheduleAfter(ctx context.Context, d time.Duration, e Event) *time.Timer {
+	if d <= 0 {
+		return es.Schedule(ctx, time.Now(), e)
+	}
+	return time.AfterFunc(d, func() {
+		_ = es.Subscribe(ctx, e)
+		es.Publish()
+	})
+}
