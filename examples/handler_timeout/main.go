@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // Handler runs for 150 ms unless its context is cancelled.

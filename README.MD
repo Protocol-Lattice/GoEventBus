@@ -6,7 +6,7 @@
 
 A blazing‑fast, in‑memory, lock‑free event bus for Go—ideal for low‑latency pipelines, microservices, and game loops.  
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/Raezil/GoEventBus)](...)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Protocol-Lattice/GoEventBus)](...)
 
 ## 📚 Table of Contents
 - [Features](#features)
@@ -51,7 +51,8 @@ Whether you’re building real‑time analytics, high‑throughput microservices
 ## Installation
 
 ```bash
-go get github.com/Raezil/GoEventBus
+go get github.com/Protocol-Lattice/GoEventBus
+
 ```
 
 ## Quick Start
@@ -64,7 +65,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // Define a typed projection as a struct
@@ -131,7 +132,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 func main() {
@@ -354,7 +355,7 @@ All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Raezil/GoEventBus/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](github.com/Protocol-Lattice/GoEventBus/issues).
 
 ## License
 
