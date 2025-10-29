@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Protocol-Lattice/GoEventBus"
+	"github.com/Raezil/GoEventBus"
 	"github.com/fasthttp/router"
 	"github.com/valyala/fasthttp"
 )

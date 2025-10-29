@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Protocol-Lattice/GoEventBus"
+	"github.com/Raezil/GoEventBus"
 )
 
 // Demonstrates OverrunPolicy=ReturnError (fail fast).

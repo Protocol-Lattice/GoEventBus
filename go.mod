@@ -1,4 +1,4 @@
-module github.com/Protocol-Lattice/GoEventBus
+module github.com/Raezil/GoEventBus
 
 go 1.23.0
 
