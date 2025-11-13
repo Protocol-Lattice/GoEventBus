@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // Define a typed projection as a struct

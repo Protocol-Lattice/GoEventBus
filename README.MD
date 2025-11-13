@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/Raezil/GoEventBus/blob/main/logo2025.png?raw=true">
+  <img src="https://github.com/Protocol-Lattice/GoEventBus/blob/main/logo2025.png?raw=true">
 </p>
 
 # GoEventBus

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // Shows back‑pressure timeout when the buffer is full.

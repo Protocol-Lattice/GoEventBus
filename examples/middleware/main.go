@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // Example of a logging middleware that logs before and after handler execution.

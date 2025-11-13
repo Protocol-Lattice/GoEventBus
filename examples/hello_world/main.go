@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 func main() {

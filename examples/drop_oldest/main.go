@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Raezil/GoEventBus"
+	"github.com/Protocol-Lattice/GoEventBus"
 )
 
 // OverrunPolicy=DropOldest silently discards events.
