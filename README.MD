@@ -71,18 +71,27 @@ import (
 // Define a typed projection as a struct
 type HouseWasSold struct{}
 
+// Define strongly typed payloads
+type UserCreatedPayload struct {
+	ID string
+}
+
+type HouseSoldPayload struct {
+	Address string
+	Price   int
+}
+
 func main() {
 	// Create a dispatcher mapping projections (string or struct) to handlers
 	dispatcher := GoEventBus.Dispatcher{
 		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			userID := ev.Args["id"].(string)
-			fmt.Println("User created with ID:", userID)
+			payload := ev.Data.(UserCreatedPayload)
+			fmt.Println("User created with ID:", payload.ID)
 			return GoEventBus.Result{Message: "handled user_created"}, nil
 		},
 		HouseWasSold{}: func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			address := ev.Args["address"].(string)
-			price := ev.Args["price"].(int)
-			fmt.Printf("House sold at %s for $%d\n", address, price)
+			payload := ev.Data.(HouseSoldPayload)
+			fmt.Printf("House sold at %s for $%d\n", payload.Address, payload.Price)
 			return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
 		},
 	}
@@ -97,14 +106,14 @@ func main() {
 	_ = store.Subscribe(context.Background(), GoEventBus.Event{
 		ID:         "evt1",
 		Projection: "user_created",
-		Args:       map[string]any{"id": "12345"},
+		Data:       UserCreatedPayload{ID: "12345"},
 	})
 
 	// Enqueue a struct-based event
 	_ = store.Subscribe(context.Background(), GoEventBus.Event{
 		ID:         "evt2",
 		Projection: HouseWasSold{},
-		Args:       map[string]any{"address": "123 Main St", "price": 500000},
+		Data:       HouseSoldPayload{Address: "123 Main St", Price: 500000},
 	})
 
 	// Process pending events
@@ -138,6 +147,15 @@ import (
 func main() {
 	// Begin a new transaction on the existing EventStore
 
+	// Define payload types
+	type UserCreatedPayload struct {
+		ID string
+	}
+	type EmailPayload struct {
+		Template string
+		UserID   string
+	}
+
 	// Create a dispatcher mapping projections to handlers
 	dispatcher := GoEventBus.Dispatcher{
 		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
@@ -157,12 +175,12 @@ func main() {
 	tx.Publish(GoEventBus.Event{
 		ID:         "evtA",
 		Projection: "user_created",
-		Args:       map[string]any{"id": "12345"},
+		Data:       UserCreatedPayload{ID: "12345"},
 	})
 	tx.Publish(GoEventBus.Event{
 		ID:         "evtB",
 		Projection: "send_email",
-		Args:       map[string]any{"template": "welcome", "userID": "12345"},
+		Data:       EmailPayload{Template: "welcome", UserID: "12345"},
 	})
 	tx.Rollback()
 
@@ -186,9 +204,9 @@ type Result struct {
 ### `type Dispatcher`
 
 ```go
-type Dispatcher map[interface{}]func(context.Context, map[string]any) (Result, error)
+type Dispatcher map[interface{}]func(context.Context, Event) (Result, error)
 ```
-A map from projection keys to handler functions. Handlers receive a `context.Context` and an argument map, and return a `Result` and an error.
+A map from projection keys to handler functions. Handlers receive a `context.Context` and an `Event` object (which typically carries a strongly-typed `Data` payload), and return a `Result` and an error.
 
 ### `type Event`
 
@@ -196,7 +214,9 @@ A map from projection keys to handler functions. Handlers receive a `context.Con
 type Event struct {
     ID         string          // Unique identifier for the event
     Projection interface{}     // Key to look up the handler in the dispatcher
-    Args       map[string]any  // Payload data for the event
+    Data       any             // Type-safe payload for the event (preferred)
+    Args       map[string]any  // Legacy payload (deprecated)
+    Ctx        context.Context // Carried context
 }
 ```
 
