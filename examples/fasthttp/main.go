@@ -16,16 +16,16 @@ import (
 func main() {
 	// 1) Setup your dispatcher
 	dispatcher := GoEventBus.Dispatcher{
-		"sayHello": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+		"sayHello": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 			fmt.Printf("[%s] Hello, %s!\n",
 				time.Now().Format(time.StampMilli),
-				args["name"],
+				ev.Args["name"],
 			)
 			return GoEventBus.Result{}, nil
 		},
-		"computeSum": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-			a := args["a"].(int)
-			b := args["b"].(int)
+		"computeSum": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+			a := ev.Args["a"].(int)
+			b := ev.Args["b"].(int)
 			sum := a + b
 			fmt.Printf("[%s] %d + %d = %d\n",
 				time.Now().Format(time.StampMilli),

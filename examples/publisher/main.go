@@ -17,14 +17,14 @@ type HouseWasSold struct{}
 
 func main() {
 	dispatcher := GoEventBus.Dispatcher{
-		"user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-			userID := args["id"].(string)
+		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+			userID := ev.Args["id"].(string)
 			fmt.Println("User created with ID:", userID)
 			return GoEventBus.Result{Message: "handled user_created"}, nil
 		},
-		HouseWasSold{}: func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-			address := args["address"].(string)
-			price := args["price"].(int)
+		HouseWasSold{}: func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+			address := ev.Args["address"].(string)
+			price := ev.Args["price"].(int)
 			fmt.Printf("House sold at %s for $%d\n", address, price)
 			return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
 		},

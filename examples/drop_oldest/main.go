@@ -11,7 +11,7 @@ import (
 // OverrunPolicy=DropOldest silently discards events.
 func main() {
 	dispatcher := GoEventBus.Dispatcher{
-		"noop": func(ctx context.Context, _ map[string]any) (GoEventBus.Result, error) {
+		"noop": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 			time.Sleep(80 * time.Millisecond)
 			return GoEventBus.Result{}, nil
 		},
