@@ -11,7 +11,7 @@ import (
 // Handler runs for 150 ms unless its context is cancelled.
 func main() {
 	dispatcher := GoEventBus.Dispatcher{
-		"demo": func(ctx context.Context, _ map[string]any) (GoEventBus.Result, error) {
+		"demo": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 			select {
 			case <-time.After(150 * time.Millisecond):
 				fmt.Println("handler OK")

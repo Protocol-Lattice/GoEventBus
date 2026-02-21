@@ -67,7 +67,7 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 			}
 
 			// invoke handler
-			res, err := wrapped(cctx, ev.Args)
+			res, err := wrapped(cctx, ev)
 			atomic.AddUint64(&tx.store.processedCount, 1)
 
 			// after hooks

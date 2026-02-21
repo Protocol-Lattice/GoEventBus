@@ -15,10 +15,10 @@ import (
 func main() {
 	// 1) Build your dispatcher
 	dispatcher := GoEventBus.Dispatcher{
-		"user_created": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 			select {
 			case <-time.After(500 * time.Millisecond):
-				fmt.Println("Processed user_created:", args["id"])
+				fmt.Println("Processed user_created:", ev.Args["id"])
 			case <-ctx.Done():
 				return GoEventBus.Result{}, ctx.Err()
 			}

@@ -9,7 +9,7 @@ import (
 
 // dummy handler just increments a counter
 func makeCounterHandler(counter *uint64) HandlerFunc {
-	return func(ctx context.Context, args map[string]any) (Result, error) {
+	return func(ctx context.Context, ev Event) (Result, error) {
 		atomic.AddUint64(counter, 1)
 		return Result{Message: "ok"}, nil
 	}
@@ -56,7 +56,7 @@ func TestTransaction_PartialFailure(t *testing.T) {
 	// handler that errors on the second event
 	cnt := uint64(0)
 	dispatcher := Dispatcher{
-		"x": func(ctx context.Context, args map[string]any) (Result, error) {
+		"x": func(ctx context.Context, ev Event) (Result, error) {
 			i := atomic.AddUint64(&cnt, 1)
 			if i == 2 {
 				return Result{}, errors.New("boom")
@@ -83,7 +83,7 @@ func TestTransaction_PartialFailure(t *testing.T) {
 
 func BenchmarkTransaction_SyncCommit(b *testing.B) {
 	dispatcher := Dispatcher{
-		"p": func(ctx context.Context, args map[string]any) (Result, error) {
+		"p": func(ctx context.Context, ev Event) (Result, error) {
 			return Result{Message: "ok"}, nil
 		},
 	}
@@ -106,7 +106,7 @@ func BenchmarkTransaction_SyncCommit(b *testing.B) {
 
 func BenchmarkTransaction_AsyncCommit(b *testing.B) {
 	dispatcher := Dispatcher{
-		"p": func(ctx context.Context, args map[string]any) (Result, error) {
+		"p": func(ctx context.Context, ev Event) (Result, error) {
 			return Result{Message: "ok"}, nil
 		},
 	}

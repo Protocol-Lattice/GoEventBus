@@ -10,8 +10,8 @@ import (
 func main() {
 	// 1) Create a dispatcher mapping projections to handlers
 	dispatcher := GoEventBus.Dispatcher{
-		"say_hello": func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-			name := args["name"].(string)
+		"say_hello": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+			name := ev.Args["name"].(string)
 			fmt.Printf("Hello, %s!\n", name)
 			return GoEventBus.Result{Message: "greeted"}, nil
 		},

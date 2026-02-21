@@ -35,7 +35,7 @@ const cacheLine = 64
 type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
 
 // HandlerFunc is the signature for event handlers and middleware.
-type HandlerFunc func(context.Context, map[string]any) (Result, error)
+type HandlerFunc func(context.Context, Event) (Result, error)
 
 // Middleware wraps a HandlerFunc, returning a new HandlerFunc.
 type Middleware func(HandlerFunc) HandlerFunc
@@ -52,7 +52,8 @@ type Dispatcher map[interface{}]HandlerFunc
 type Event struct {
 	ID         string
 	Projection interface{}
-	Args       map[string]any
+	Data       any             // Type-safe payload (preferred)
+	Args       map[string]any  // Legacy payload (deprecated)
 	Ctx        context.Context // carried context from Subscribe
 }
 
@@ -220,7 +221,7 @@ func (es *EventStore) execute(h HandlerFunc, ev Event) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// override with explicit __ctx if set
+	// override with explicit __ctx if set in legacy Args
 	if c, ok := ev.Args["__ctx"].(context.Context); ok && c != nil {
 		ctx = c
 	}
@@ -232,7 +233,7 @@ func (es *EventStore) execute(h HandlerFunc, ev Event) {
 	for i := len(es.middlewares) - 1; i >= 0; i-- {
 		wrapped = es.middlewares[i](wrapped)
 	}
-	res, err := wrapped(ctx, ev.Args)
+	res, err := wrapped(ctx, ev)
 	atomic.AddUint64(&es.processedCount, 1)
 
 	for _, hook := range es.afterHooks {

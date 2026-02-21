@@ -10,10 +10,10 @@ import (
 
 // Example of a logging middleware that logs before and after handler execution.
 func loggingMiddleware(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
-	return func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+	return func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 		start := time.Now()
-		fmt.Printf("[Middleware] Starting handler, args=%v\n", args)
-		res, err := next(ctx, args)
+		fmt.Printf("[Middleware] Starting handler, args=%v\n", ev.Args)
+		res, err := next(ctx, ev)
 		fmt.Printf("[Middleware] Finished handler in %s, result=%+v, err=%v\n", time.Since(start), res, err)
 		return res, err
 	}
@@ -37,13 +37,13 @@ func errorHook(ctx context.Context, ev GoEventBus.Event, err error) {
 func main() {
 	// 1. Create dispatcher and register handlers
 	disp := GoEventBus.Dispatcher{}
-	disp["greet"] = func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
-		name := args["name"].(string)
+	disp["greet"] = func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+		name := ev.Args["name"].(string)
 		msg := fmt.Sprintf("Hello, %s!", name)
 		return GoEventBus.Result{Message: msg}, nil
 	}
 	// A handler that sometimes errors
-	disp["fail"] = func(ctx context.Context, args map[string]any) (GoEventBus.Result, error) {
+	disp["fail"] = func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 		return GoEventBus.Result{}, fmt.Errorf("intentional error")
 	}
 
