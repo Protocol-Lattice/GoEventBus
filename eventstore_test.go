@@ -485,12 +485,11 @@ func BenchmarkSubscribePublish(b *testing.B) {
 	b.Run("Async", func(b *testing.B) { bench(true) })
 }
 
-// TestContextPropagation verifies that a context injected through Args["__ctx"]
+// TestContextPropagation verifies that a context passed to Subscribe
 // is forwarded to the handler.
 func TestContextPropagation(t *testing.T) {
 	const key, val = "myKey", "myVal"
 
-	// prepare a context with a distinctive value
 	ctx := context.WithValue(context.Background(), key, val)
 
 	var received string
@@ -504,8 +503,7 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	es := NewEventStore(&disp, 8, DropOldest)
-	// inject ctx via the reserved "__ctx" argument key
-	_ = es.Subscribe(context.Background(), Event{ID: "1", Projection: "ctx", Args: map[string]any{"__ctx": ctx}})
+	_ = es.Subscribe(ctx, Event{ID: "1", Projection: "ctx"})
 	es.Publish()
 
 	if received != val {
@@ -868,4 +866,60 @@ func TestSchedule_Cancel(t *testing.T) {
 	if atomic.LoadUint32(&called) != 0 {
 		t.Fatal("handler fired despite cancellation")
 	}
+}
+
+// TestWorkerRecoverFromPanic verifies that a panicking handler does not kill the worker
+// goroutine and that subsequent events are still processed.
+func TestWorkerRecoverFromPanic(t *testing.T) {
+	var good uint32
+	disp := Dispatcher{
+		"panic": func(_ context.Context, ev Event) (Result, error) {
+			panic("intentional panic")
+		},
+		"ok": func(_ context.Context, ev Event) (Result, error) {
+			atomic.AddUint32(&good, 1)
+			return Result{}, nil
+		},
+	}
+	es := NewEventStore(&disp, 16, DropOldest)
+	es.Async = true
+
+	// publish a panicking event followed by a good event
+	_ = es.Subscribe(context.Background(), Event{Projection: "panic"})
+	_ = es.Subscribe(context.Background(), Event{Projection: "ok"})
+	es.Publish()
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer drainCancel()
+	if err := es.Drain(drainCtx); err != nil {
+		t.Fatalf("Drain failed: %v", err)
+	}
+	if atomic.LoadUint32(&good) != 1 {
+		t.Fatalf("expected good handler to run once; got %d", good)
+	}
+	_, _, errs := es.Metrics()
+	if errs != 1 {
+		t.Fatalf("expected error counter == 1 (for the panic); got %d", errs)
+	}
+}
+
+// TestNewEventStore_NilDispatcherPanics verifies fail-fast on nil dispatcher.
+func TestNewEventStore_NilDispatcherPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for nil dispatcher, got none")
+		}
+	}()
+	NewEventStore(nil, 8, DropOldest)
+}
+
+// TestNewEventStore_ZeroBufferPanics verifies fail-fast on zero buffer size.
+func TestNewEventStore_ZeroBufferPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for zero buffer size, got none")
+		}
+	}()
+	disp := Dispatcher{}
+	NewEventStore(&disp, 0, DropOldest)
 }
