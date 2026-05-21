@@ -45,8 +45,15 @@ type BeforeHook func(context.Context, Event)
 type AfterHook func(context.Context, Event, Result, error)
 type ErrorHook func(context.Context, Event, error)
 
-// Dispatcher maps event projections to handler functions.
-type Dispatcher map[interface{}]HandlerFunc
+// Dispatcher maps event projections to one or more handler functions.
+// Multiple handlers registered for the same projection are called in order (fan-out).
+type Dispatcher map[interface{}][]HandlerFunc
+
+// Register appends one or more handlers for the given projection.
+// Calling Register multiple times on the same key accumulates handlers.
+func (d Dispatcher) Register(projection interface{}, handlers ...HandlerFunc) {
+	d[projection] = append(d[projection], handlers...)
+}
 
 // Event is a unit of work to be dispatched.
 type Event struct {
@@ -211,16 +218,18 @@ func (es *EventStore) Publish() {
 			continue
 		}
 		ev := *p
-		if handler, ok := disp[ev.Projection]; ok {
-			if es.Async {
-				es.wg.Add(1)
-				select {
-				case es.workCh <- eventWork{handler, ev}:
-				case <-es.shutdownSignal:
-					es.wg.Done()
+		if handlers, ok := disp[ev.Projection]; ok {
+			for _, handler := range handlers {
+				if es.Async {
+					es.wg.Add(1)
+					select {
+					case es.workCh <- eventWork{handler, ev}:
+					case <-es.shutdownSignal:
+						es.wg.Done()
+					}
+				} else {
+					es.execute(handler, ev)
 				}
-			} else {
-				es.execute(handler, ev)
 			}
 		}
 	}
@@ -293,7 +302,7 @@ func (es *EventStore) Schedule(ctx context.Context, t time.Time, e Event) *time.
 		e.Ctx = ctx
 		// look up and run the handler directly
 		disp := *es.dispatcher
-		if handler, ok := disp[e.Projection]; ok {
+		for _, handler := range disp[e.Projection] {
 			es.execute(handler, e)
 		}
 		return nil

@@ -19,7 +19,7 @@ func TestTransaction_CommitAndRollback(t *testing.T) {
 	// set up dispatcher with a no-op projection
 	var processed uint64
 	dispatcher := Dispatcher{
-		"p": makeCounterHandler(&processed),
+		"p": hs(makeCounterHandler(&processed)),
 	}
 
 	es := NewEventStore(&dispatcher, 8, DropOldest)
@@ -56,13 +56,13 @@ func TestTransaction_PartialFailure(t *testing.T) {
 	// handler that errors on the second event
 	cnt := uint64(0)
 	dispatcher := Dispatcher{
-		"x": func(ctx context.Context, ev Event) (Result, error) {
+		"x": hs(func(ctx context.Context, ev Event) (Result, error) {
 			i := atomic.AddUint64(&cnt, 1)
 			if i == 2 {
 				return Result{}, errors.New("boom")
 			}
 			return Result{Message: "ok"}, nil
-		},
+		}),
 	}
 
 	es := NewEventStore(&dispatcher, 4, ReturnError)
@@ -83,9 +83,9 @@ func TestTransaction_PartialFailure(t *testing.T) {
 
 func BenchmarkTransaction_SyncCommit(b *testing.B) {
 	dispatcher := Dispatcher{
-		"p": func(ctx context.Context, ev Event) (Result, error) {
+		"p": hs(func(ctx context.Context, ev Event) (Result, error) {
 			return Result{Message: "ok"}, nil
-		},
+		}),
 	}
 	es := NewEventStore(&dispatcher, 256, DropOldest)
 	es.Async = false
@@ -106,9 +106,9 @@ func BenchmarkTransaction_SyncCommit(b *testing.B) {
 
 func BenchmarkTransaction_AsyncCommit(b *testing.B) {
 	dispatcher := Dispatcher{
-		"p": func(ctx context.Context, ev Event) (Result, error) {
+		"p": hs(func(ctx context.Context, ev Event) (Result, error) {
 			return Result{Message: "ok"}, nil
-		},
+		}),
 	}
 	es := NewEventStore(&dispatcher, 256, DropOldest)
 	es.Async = true
