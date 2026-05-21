@@ -66,9 +66,19 @@ type Event struct {
 }
 
 // internal work unit for async dispatch
-type eventWork struct {
-	handler HandlerFunc
-	ev      Event
+type workKind uint8
+
+const (
+	workSingle workKind = iota
+	workBatch
+)
+
+type work struct {
+	kind    workKind
+	handler HandlerFunc      // workSingle
+	ev      Event            // workSingle
+	batchFn BatchHandlerFunc // workBatch
+	events  []Event          // workBatch
 }
 
 // EventStore is a high-performance, lock-free ring buffer with middleware and hooks support.
@@ -92,9 +102,12 @@ type EventStore struct {
 	afterHooks  []AfterHook
 	errorHooks  []ErrorHook
 
+	// Batch handlers (projection → []batchEntry); populated via RegisterBatch.
+	batchHandlers map[interface{}][]batchEntry
+
 	// Async worker pool
 	asyncWorkers   int
-	workCh         chan eventWork
+	workCh         chan work
 	wg             sync.WaitGroup
 	shutdownOnce   sync.Once
 	shutdownSignal chan struct{}
@@ -125,8 +138,9 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 		buf:            make([]atomic.Pointer[Event], bufferSize),
 		events:         make([]Event, bufferSize),
 		OverrunPolicy:  policy,
+		batchHandlers:  make(map[interface{}][]batchEntry),
 		asyncWorkers:   runtime.NumCPU(),
-		workCh:         make(chan eventWork, bufferSize),
+		workCh:         make(chan work, bufferSize),
 		shutdownSignal: make(chan struct{}),
 	}
 	// start worker pool
@@ -136,12 +150,17 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 	return es
 }
 
-// worker processes eventWork from the channel until shutdown.
+// worker processes work items from the channel until shutdown.
 func (es *EventStore) worker() {
 	for w := range es.workCh {
-		func(work eventWork) {
+		func(w work) {
 			defer es.wg.Done()
-			es.execute(work.handler, work.ev)
+			switch w.kind {
+			case workSingle:
+				es.execute(w.handler, w.ev)
+			case workBatch:
+				es.executeBatch(w.batchFn, w.events)
+			}
 		}(w)
 	}
 }
@@ -201,6 +220,9 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 }
 
 // Publish processes all pending events, applying middleware and hooks.
+// Regular handlers receive one event at a time. Batch handlers registered via
+// RegisterBatch receive events grouped by projection in chunks of up to their
+// configured size.
 func (es *EventStore) Publish() {
 	head := atomic.LoadUint64(&es.head)
 	tail := atomic.LoadUint64(&es.tail)
@@ -210,6 +232,13 @@ func (es *EventStore) Publish() {
 
 	disp := *es.dispatcher
 	mask := es.size - 1
+	hasBatch := len(es.batchHandlers) > 0
+
+	// batchGroups collects events per projection for batch dispatch.
+	var batchGroups map[interface{}][]Event
+	if hasBatch {
+		batchGroups = make(map[interface{}][]Event)
+	}
 
 	for i := tail; i < head; i++ {
 		p := es.buf[i&mask].Load()
@@ -222,7 +251,7 @@ func (es *EventStore) Publish() {
 				if es.Async {
 					es.wg.Add(1)
 					select {
-					case es.workCh <- eventWork{handler, ev}:
+					case es.workCh <- work{kind: workSingle, handler: handler, ev: ev}:
 					case <-es.shutdownSignal:
 						es.wg.Done()
 					}
@@ -231,7 +260,40 @@ func (es *EventStore) Publish() {
 				}
 			}
 		}
+		if hasBatch {
+			if _, ok := es.batchHandlers[ev.Projection]; ok {
+				batchGroups[ev.Projection] = append(batchGroups[ev.Projection], ev)
+			}
+		}
 	}
+
+	// Dispatch batch handlers in chunks.
+	for proj, entries := range es.batchHandlers {
+		events := batchGroups[proj]
+		if len(events) == 0 {
+			continue
+		}
+		for _, entry := range entries {
+			for start := 0; start < len(events); start += entry.size {
+				end := start + entry.size
+				if end > len(events) {
+					end = len(events)
+				}
+				chunk := events[start:end]
+				if es.Async {
+					es.wg.Add(1)
+					select {
+					case es.workCh <- work{kind: workBatch, batchFn: entry.handler, events: chunk}:
+					case <-es.shutdownSignal:
+						es.wg.Done()
+					}
+				} else {
+					es.executeBatch(entry.handler, chunk)
+				}
+			}
+		}
+	}
+
 	atomic.StoreUint64(&es.tail, head)
 }
 
