@@ -95,12 +95,18 @@ type EventStore struct {
 	publishedCount uint64
 	processedCount uint64
 	errorCount     uint64
+
+	// txMu serialises Rollback against concurrent Subscribe calls.
+	txMu sync.Mutex
 }
 
 // NewEventStore initializes a new EventStore. It spins up a default worker pool.
 func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy) *EventStore {
-	if bufferSize&(bufferSize-1) != 0 {
-		panic("bufferSize must be a power of two")
+	if dispatcher == nil {
+		panic("GoEventBus: dispatcher must not be nil")
+	}
+	if bufferSize == 0 || bufferSize&(bufferSize-1) != 0 {
+		panic("GoEventBus: bufferSize must be a non-zero power of two")
 	}
 	es := &EventStore{
 		dispatcher:     dispatcher,
@@ -122,8 +128,15 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 // worker processes eventWork from the channel until shutdown.
 func (es *EventStore) worker() {
 	for w := range es.workCh {
-		es.execute(w.handler, w.ev)
-		es.wg.Done()
+		func(work eventWork) {
+			defer func() {
+				if r := recover(); r != nil {
+					atomic.AddUint64(&es.errorCount, 1)
+				}
+				es.wg.Done()
+			}()
+			es.execute(work.handler, work.ev)
+		}(w)
 	}
 }
 
@@ -216,14 +229,9 @@ func (es *EventStore) Publish() {
 
 // execute runs the handler with middleware and hooks.
 func (es *EventStore) execute(h HandlerFunc, ev Event) {
-	// pick up recorded context
 	ctx := ev.Ctx
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	// override with explicit __ctx if set in legacy Args
-	if c, ok := ev.Args["__ctx"].(context.Context); ok && c != nil {
-		ctx = c
 	}
 
 	for _, hook := range es.beforeHooks {

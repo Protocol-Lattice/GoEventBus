@@ -49,10 +49,9 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 		}
 		ev := *evPtr
 		if handler, ok := disp[ev.Projection]; ok {
-			// pick up recorded context
 			cctx := ev.Ctx
-			if c2, ok2 := ev.Args["__ctx"].(context.Context); ok2 && c2 != nil {
-				cctx = c2
+			if cctx == nil {
+				cctx = ctx
 			}
 
 			// before hooks
@@ -97,18 +96,18 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 
 // Rollback clears the local buffer *and* any events that have already
 // been pushed into the store’s ring-buffer since the transaction began.
+// It holds txMu for the duration to prevent concurrent Subscribe calls
+// from advancing head between the snapshot and the head reset.
 func (tx *Transaction) Rollback() {
-	// clear our local buffer
 	tx.events = tx.events[:0]
 
-	// remove any partial enqueues from the store
+	tx.store.txMu.Lock()
+	defer tx.store.txMu.Unlock()
+
 	currHead := atomic.LoadUint64(&tx.store.head)
 	mask := tx.store.size - 1
 	for i := tx.startHead; i < currHead; i++ {
-		// clear slot atomically
 		tx.store.buf[i&mask].Store(nil)
 	}
-
-	// restore the head pointer
 	atomic.StoreUint64(&tx.store.head, tx.startHead)
 }
