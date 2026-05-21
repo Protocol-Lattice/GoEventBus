@@ -10,12 +10,11 @@ import (
 
 // OverrunPolicy=DropOldest silently discards events.
 func main() {
-	dispatcher := GoEventBus.Dispatcher{
-		"noop": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			time.Sleep(80 * time.Millisecond)
-			return GoEventBus.Result{}, nil
-		},
-	}
+	dispatcher := GoEventBus.Dispatcher{}
+	dispatcher.Register("noop", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+		time.Sleep(80 * time.Millisecond)
+		return GoEventBus.Result{}, nil
+	})
 	store := GoEventBus.NewEventStore(&dispatcher, 2, GoEventBus.DropOldest)
 
 	for i := 0; i < 5; i++ {

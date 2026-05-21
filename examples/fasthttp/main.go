@@ -15,25 +15,24 @@ import (
 
 func main() {
 	// 1) Setup your dispatcher
-	dispatcher := GoEventBus.Dispatcher{
-		"sayHello": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			fmt.Printf("[%s] Hello, %s!\n",
-				time.Now().Format(time.StampMilli),
-				ev.Args["name"],
-			)
-			return GoEventBus.Result{}, nil
-		},
-		"computeSum": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			a := ev.Args["a"].(int)
-			b := ev.Args["b"].(int)
-			sum := a + b
-			fmt.Printf("[%s] %d + %d = %d\n",
-				time.Now().Format(time.StampMilli),
-				a, b, sum,
-			)
-			return GoEventBus.Result{Message: strconv.Itoa(sum)}, nil
-		},
-	}
+	dispatcher := GoEventBus.Dispatcher{}
+	dispatcher.Register("sayHello", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+		fmt.Printf("[%s] Hello, %s!\n",
+			time.Now().Format(time.StampMilli),
+			ev.Args["name"],
+		)
+		return GoEventBus.Result{}, nil
+	})
+	dispatcher.Register("computeSum", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+		a := ev.Args["a"].(int)
+		b := ev.Args["b"].(int)
+		sum := a + b
+		fmt.Printf("[%s] %d + %d = %d\n",
+			time.Now().Format(time.StampMilli),
+			a, b, sum,
+		)
+		return GoEventBus.Result{Message: strconv.Itoa(sum)}, nil
+	})
 
 	// 2) Create the EventStore
 	store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)

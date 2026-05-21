@@ -37,15 +37,15 @@ func errorHook(ctx context.Context, ev GoEventBus.Event, err error) {
 func main() {
 	// 1. Create dispatcher and register handlers
 	disp := GoEventBus.Dispatcher{}
-	disp["greet"] = func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+	disp.Register("greet", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 		name := ev.Args["name"].(string)
 		msg := fmt.Sprintf("Hello, %s!", name)
 		return GoEventBus.Result{Message: msg}, nil
-	}
+	})
 	// A handler that sometimes errors
-	disp["fail"] = func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+	disp.Register("fail", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
 		return GoEventBus.Result{}, fmt.Errorf("intentional error")
-	}
+	})
 
 	// 2. Initialize EventStore
 	store := GoEventBus.NewEventStore(&disp, 16, GoEventBus.DropOldest)

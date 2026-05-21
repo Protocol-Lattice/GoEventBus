@@ -48,12 +48,11 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 			continue
 		}
 		ev := *evPtr
-		if handler, ok := disp[ev.Projection]; ok {
-			cctx := ev.Ctx
-			if cctx == nil {
-				cctx = ctx
-			}
-
+		cctx := ev.Ctx
+		if cctx == nil {
+			cctx = ctx
+		}
+		for _, handler := range disp[ev.Projection] {
 			// before hooks
 			for _, hook := range tx.store.beforeHooks {
 				hook(cctx, ev)
@@ -79,7 +78,6 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 				for _, hook := range tx.store.errorHooks {
 					hook(cctx, ev, err)
 				}
-				// advance tail and exit on first handler error
 				atomic.StoreUint64(&tx.store.tail, head)
 				return err
 			}
