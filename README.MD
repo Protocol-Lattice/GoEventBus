@@ -4,56 +4,52 @@
 
 # GoEventBus
 
-A blazing‑fast, in‑memory, lock‑free event bus for Go—ideal for low‑latency pipelines, microservices, and game loops.  
+A high-performance, in-memory, lock-free event bus for Go — built on a cache-line-padded atomic ring buffer with fan-out dispatch, middleware, lifecycle hooks, and back-pressure policies.
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/Protocol-Lattice/GoEventBus)](...)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Protocol-Lattice/GoEventBus)](https://goreportcard.com/report/github.com/Protocol-Lattice/GoEventBus)
 
-## 📚 Table of Contents
+## Table of Contents
+
 - [Features](#features)
-- [Why GoEventBus?](#why-goeventbus)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Fan-out](#fan-out)
+- [Middleware](#middleware)
+- [Lifecycle Hooks](#lifecycle-hooks)
+- [Back-pressure Policies](#back-pressure-policies)
+- [Async Mode](#async-mode)
 - [Transactions](#transactions)
+- [Scheduling](#scheduling)
 - [API Reference](#api-reference)
-- [Back-pressure and Overrun Policies](#back-pressure-and-overrun-policies)
-- [Use Cases](#-use-cases)
 - [Benchmarks](#benchmarks)
 - [Contributing](#contributing)
 - [License](#license)
 
+---
+
 ## Features
 
-- **Lock‑free ring buffer**: Efficient event dispatching using atomic operations and cache‑line padding.
-- **Context‑aware handlers**: Every handler now receives a `context.Context`, enabling deadlines, cancellation and tracing.
-- **Back‑pressure policies**: Choose whether to drop, block, or error when the buffer is full.
-- **Configurable buffer size**: Specify the ring buffer size (must be a power of two) when creating the store.
-- **Async or Sync processing**: Toggle between synchronous handling or async goroutine‑based processing via the `Async` flag.
-- **Metrics**: Track published, processed, and errored event counts with a simple API.
-- **Simple API**: Easy to subscribe, publish, and retrieve metrics.
+- **Lock-free ring buffer** — atomic operations with cache-line padding keep dispatch sub-microsecond
+- **Fan-out dispatch** — register multiple independent handlers per projection; each runs its own middleware chain
+- **Sync or async** — flip `store.Async = true` to hand work off to a fixed worker pool
+- **Middleware** — wrap handlers with logging, tracing, retries, or any cross-cutting behaviour
+- **Lifecycle hooks** — `OnBefore`, `OnAfter`, `OnError` for observability without touching handler logic
+- **Back-pressure** — choose `DropOldest`, `Block`, or `ReturnError` per store
+- **Transactions** — batch events and commit or roll back as a unit
+- **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
+- **Metrics** — published, processed, and error counters via a single call
 
-## Why GoEventBus?
-
-Modern Go apps demand lightning‑fast, non‑blocking communication—but channels can bottleneck and external brokers add latency, complexity and ops overhead. GoEventBus is your in‑process, lock‑free solution:
-
-- **Micro‑latency dispatch**  
-  Atomic, cache‑aligned ring buffers deliver sub‑microsecond hand‑offs—no locks, no syscalls, zero garbage.  
-- **Sync or Async at will**  
-  Flip a switch to run handlers inline for predictability or in goroutines for massive parallelism.  
-- **Back‑pressure your way**  
-  Choose from _DropOldest_, _Block_ or _ReturnError_ to match your system’s tolerance for loss or latency.  
-- **Built‑in observability**  
-  Expose counters for published, processed and errored events out of the box—no extra instrumentation.  
-- **Drop‑in, zero deps**  
-  One import, no external services, no workers to manage—just Go 1.21+ and you’re off.  
-
-Whether you’re building real‑time analytics, high‑throughput microservices, or game engines, GoEventBus keeps your events moving at Go‑speed.
+---
 
 ## Installation
 
 ```bash
 go get github.com/Protocol-Lattice/GoEventBus
-
 ```
+
+Requires Go 1.21+.
+
+---
 
 ## Quick Start
 
@@ -61,323 +57,354 @@ go get github.com/Protocol-Lattice/GoEventBus
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
+    "context"
+    "fmt"
+    "log"
 
-	"github.com/Protocol-Lattice/GoEventBus"
+    "github.com/Protocol-Lattice/GoEventBus"
 )
 
-// Define a typed projection as a struct
+type UserCreatedPayload struct{ ID string }
 type HouseWasSold struct{}
-
-// Define strongly typed payloads
-type UserCreatedPayload struct {
-	ID string
-}
-
 type HouseSoldPayload struct {
-	Address string
-	Price   int
+    Address string
+    Price   int
 }
 
 func main() {
-	// Create a dispatcher mapping projections (string or struct) to handlers
-	dispatcher := GoEventBus.Dispatcher{
-		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			payload := ev.Data.(UserCreatedPayload)
-			fmt.Println("User created with ID:", payload.ID)
-			return GoEventBus.Result{Message: "handled user_created"}, nil
-		},
-		HouseWasSold{}: func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			payload := ev.Data.(HouseSoldPayload)
-			fmt.Printf("House sold at %s for $%d\n", payload.Address, payload.Price)
-			return GoEventBus.Result{Message: "handled HouseWasSold"}, nil
-		},
-	}
+    disp := GoEventBus.Dispatcher{}
 
-	// Initialise an EventStore with a 64K ring buffer and DropOldest overrun policy
-	store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)
+    disp.Register("user_created", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+        p := ev.Data.(UserCreatedPayload)
+        fmt.Println("User created:", p.ID)
+        return GoEventBus.Result{Message: "ok"}, nil
+    })
 
-	// Enable asynchronous processing
-	store.Async = true
+    disp.Register(HouseWasSold{}, func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+        p := ev.Data.(HouseSoldPayload)
+        fmt.Printf("House sold at %s for $%d\n", p.Address, p.Price)
+        return GoEventBus.Result{Message: "ok"}, nil
+    })
 
-	// Enqueue a string-based event
-	_ = store.Subscribe(context.Background(), GoEventBus.Event{
-		ID:         "evt1",
-		Projection: "user_created",
-		Data:       UserCreatedPayload{ID: "12345"},
-	})
+    store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
+    store.Async = true
 
-	// Enqueue a struct-based event
-	_ = store.Subscribe(context.Background(), GoEventBus.Event{
-		ID:         "evt2",
-		Projection: HouseWasSold{},
-		Data:       HouseSoldPayload{Address: "123 Main St", Price: 500000},
-	})
+    _ = store.Subscribe(context.Background(), GoEventBus.Event{
+        ID:         "evt1",
+        Projection: "user_created",
+        Data:       UserCreatedPayload{ID: "u-42"},
+    })
+    _ = store.Subscribe(context.Background(), GoEventBus.Event{
+        ID:         "evt2",
+        Projection: HouseWasSold{},
+        Data:       HouseSoldPayload{Address: "1 Main St", Price: 500_000},
+    })
 
-	// Process pending events
-	store.Publish()
+    store.Publish()
 
-	// Wait for all async handlers to finish
-	if err := store.Drain(context.Background()); err != nil {
-		log.Fatalf("Failed to drain EventStore: %v", err)
-	}
+    if err := store.Drain(context.Background()); err != nil {
+        log.Fatal(err)
+    }
 
-	// Retrieve metrics
-	published, processed, errors := store.Metrics()
-	fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
+    published, processed, errors := store.Metrics()
+    fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
 }
 ```
+
+**Key points:**
+
+- `Projection` can be any comparable value — a string, a struct, an integer.
+- `Data` carries the type-safe payload; assert it inside the handler.
+- Pass the context your handler should respect to `Subscribe`; it is forwarded to every handler.
+
+---
+
+## Fan-out
+
+`Register` accumulates handlers. Every handler registered for a projection is called in order for each dispatched event. Handlers are fully independent — an error in one does not prevent the others from running.
+
+```go
+disp := GoEventBus.Dispatcher{}
+
+// Register as many handlers as you need for the same projection.
+disp.Register("order.placed",
+    auditLogger,
+    inventoryReducer,
+    notificationSender,
+)
+
+// Register can also be called incrementally across different packages.
+disp.Register("order.placed", analyticsTracker)
+```
+
+In async mode each handler invocation becomes its own work item, so the four handlers above may run in parallel across the worker pool.
+
+---
+
+## Middleware
+
+Middleware wraps the handler chain and is applied in the order it is registered. Use it for logging, tracing, timeout injection, or retries.
+
+```go
+// Logging middleware
+store.Use(func(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
+    return func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+        log.Printf("handling %v", ev.Projection)
+        res, err := next(ctx, ev)
+        log.Printf("done %v err=%v", ev.Projection, err)
+        return res, err
+    }
+})
+
+// Timeout middleware
+store.Use(func(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
+    return func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+        ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+        defer cancel()
+        return next(ctx, ev)
+    }
+})
+```
+
+Each handler in a fan-out gets its own independent copy of the middleware chain.
+
+---
+
+## Lifecycle Hooks
+
+Hooks fire outside the middleware chain and are useful for metrics, structured logging, and alerting without polluting handler code.
+
+```go
+store.OnBefore(func(ctx context.Context, ev GoEventBus.Event) {
+    // fires before each handler invocation
+})
+
+store.OnAfter(func(ctx context.Context, ev GoEventBus.Event, res GoEventBus.Result, err error) {
+    // fires after each handler invocation, whether it succeeded or failed
+})
+
+store.OnError(func(ctx context.Context, ev GoEventBus.Event, err error) {
+    // fires only when a handler returns a non-nil error
+    log.Printf("handler error for %v: %v", ev.Projection, err)
+})
+```
+
+---
+
+## Back-pressure Policies
+
+Choose how `Subscribe` behaves when the ring buffer is full.
+
+| Policy | Behaviour | Best for |
+|---|---|---|
+| `DropOldest` | Discards the oldest event to make room | Low-latency pipelines where fresh data matters more than completeness |
+| `Block` | Blocks the caller (respecting its context) until space is available | Workloads that cannot afford to lose events |
+| `ReturnError` | Returns `ErrBufferFull` immediately | Callers that manage their own retry or back-pressure logic |
+
+```go
+store := GoEventBus.NewEventStore(&disp, 1<<14, GoEventBus.Block)
+
+ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+defer cancel()
+
+if err := store.Subscribe(ctx, ev); errors.Is(err, context.DeadlineExceeded) {
+    // buffer stayed full for 50 ms — handle accordingly
+}
+```
+
+---
+
+## Async Mode
+
+Set `store.Async = true` before the first `Publish` call. GoEventBus starts a worker pool sized to `runtime.NumCPU()` and routes every handler invocation through it.
+
+```go
+store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
+store.Async = true
+
+store.Publish() // dispatches handlers to the worker pool
+
+// Wait for all in-flight handlers before shutting down.
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+if err := store.Drain(ctx); err != nil {
+    log.Printf("drain timeout: %v", err)
+}
+```
+
+`Drain` (or equivalently `Close`) must be called once when the store is no longer needed so worker goroutines are cleaned up.
+
+---
 
 ## Transactions
 
-GoEventBus now supports atomic transactions, allowing you to group multiple events and commit them together. This ensures that either all events are successfully published and handled, or none are.
+Group multiple events into a single commit. If any handler returns an error, `Commit` stops and returns that error. Call `Rollback` to discard buffered events without publishing.
 
 ```go
-package main
+type OrderPayload struct{ OrderID string }
+type InvoicePayload struct{ OrderID string }
 
-import (
-	"context"
-	"log"
+disp := GoEventBus.Dispatcher{}
+disp.Register("order.created", handleOrder)
+disp.Register("invoice.issued", handleInvoice)
 
-	"github.com/Protocol-Lattice/GoEventBus"
-)
+store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
 
-func main() {
-	// Begin a new transaction on the existing EventStore
+tx := store.BeginTransaction()
 
-	// Define payload types
-	type UserCreatedPayload struct {
-		ID string
-	}
-	type EmailPayload struct {
-		Template string
-		UserID   string
-	}
+tx.Publish(GoEventBus.Event{
+    ID:         "ev-1",
+    Projection: "order.created",
+    Data:       OrderPayload{OrderID: "ord-99"},
+})
+tx.Publish(GoEventBus.Event{
+    ID:         "ev-2",
+    Projection: "invoice.issued",
+    Data:       InvoicePayload{OrderID: "ord-99"},
+})
 
-	// Create a dispatcher mapping projections to handlers
-	dispatcher := GoEventBus.Dispatcher{
-		"user_created": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			return GoEventBus.Result{Message: "handled user_created"}, nil
-		},
-		"send_email": func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-			log.Println("Hello")
-			return GoEventBus.Result{Message: "handled send_email"}, nil
-		},
-	}
-
-	// Initialise an EventStore with a 64K ring buffer and DropOldest policy
-	store := GoEventBus.NewEventStore(&dispatcher, 1<<16, GoEventBus.DropOldest)
-	tx := store.BeginTransaction()
-
-	// Buffer multiple events
-	tx.Publish(GoEventBus.Event{
-		ID:         "evtA",
-		Projection: "user_created",
-		Data:       UserCreatedPayload{ID: "12345"},
-	})
-	tx.Publish(GoEventBus.Event{
-		ID:         "evtB",
-		Projection: "send_email",
-		Data:       EmailPayload{Template: "welcome", UserID: "12345"},
-	})
-	tx.Rollback()
-
-	// Commit the transaction atomically
-	if err := tx.Commit(context.Background()); err != nil {
-		log.Fatalf("transaction failed: %v", err)
-	}
+if err := tx.Commit(context.Background()); err != nil {
+    tx.Rollback()
+    log.Fatal("transaction failed:", err)
 }
 ```
+
+---
+
+## Scheduling
+
+Fire an event at a specific point in time or after a duration. The returned `*time.Timer` can be stopped to cancel the event before it fires.
+
+```go
+// Fire at an absolute time.
+timer := store.Schedule(ctx, time.Now().Add(10*time.Second), ev)
+if timer != nil {
+    timer.Stop() // cancel before it fires
+}
+
+// Fire after a duration.
+timer = store.ScheduleAfter(ctx, 30*time.Second, ev)
+```
+
+If the target time is in the past, or the duration is zero or negative, the event is executed synchronously and immediately without entering the ring buffer, and `nil` is returned.
+
+---
 
 ## API Reference
 
-### `type Result`
+### `Dispatcher`
 
 ```go
-type Result struct {
-    Message string // Outcome message from handler
-}
+type Dispatcher map[interface{}][]HandlerFunc
+
+func (d Dispatcher) Register(projection interface{}, handlers ...HandlerFunc)
 ```
 
-### `type Dispatcher`
+`Register` appends one or more handlers for the given projection. Calling it multiple times on the same key accumulates handlers in call order.
 
-```go
-type Dispatcher map[interface{}]func(context.Context, Event) (Result, error)
-```
-A map from projection keys to handler functions. Handlers receive a `context.Context` and an `Event` object (which typically carries a strongly-typed `Data` payload), and return a `Result` and an error.
-
-### `type Event`
+### `Event`
 
 ```go
 type Event struct {
-    ID         string          // Unique identifier for the event
-    Projection interface{}     // Key to look up the handler in the dispatcher
-    Data       any             // Type-safe payload for the event (preferred)
-    Args       map[string]any  // Legacy payload (deprecated)
-    Ctx        context.Context // Carried context
+    ID         string
+    Projection interface{}     // key used to look up handlers
+    Data       any             // type-safe payload (preferred)
+    Args       map[string]any  // legacy payload (deprecated)
 }
 ```
 
-### `type Transaction`
+### `HandlerFunc` / `Middleware`
 
 ```go
-type Transaction struct {
-    store  *EventStore
-    events []Event
-    startHead uint64 // head position when transaction began
+type HandlerFunc func(context.Context, Event) (Result, error)
+type Middleware  func(HandlerFunc) HandlerFunc
+```
 
+### `Result`
+
+```go
+type Result struct {
+    Message string
 }
 ```
 
-- `BeginTransaction() *Transaction`: Start a new transaction.
-- `Publish(e Event)`: Buffer an event within the transaction.
-- `Commit(ctx context.Context) error`: Atomically enqueue and process all buffered events, returning on the first error.
-- `Rollback()`: Discard buffered events without publishing.
-
-### `type OverrunPolicy`
+### `OverrunPolicy`
 
 ```go
-type OverrunPolicy int
-
 const (
-    DropOldest  OverrunPolicy = iota // Default: discard oldest events
-    Block                            // Block until space is available
-    ReturnError                      // Fail fast with ErrBufferFull
+    DropOldest  OverrunPolicy = iota
+    Block
+    ReturnError
 )
+
+var ErrBufferFull = errors.New("goeventbus: buffer is full")
 ```
 
-### `type EventStore`
+### `EventStore`
 
-```go
-type EventStore struct {
-    dispatcher     *Dispatcher      // Pointer to the dispatcher map
-    size           uint64           // Buffer size (power of two)
-    buf            []unsafe.Pointer // Ring buffer of event pointers
-    events         []Event          // Backing slice for Event data
-    head           uint64           // Atomic write index
-    tail           uint64           // Atomic read index
-
-    // Config flags
-    Async          bool
-    OverrunPolicy  OverrunPolicy
-
-    // Counters
-    publishedCount uint64
-    processedCount uint64
-    errorCount     uint64
-}
-```
-
-#### `NewEventStore`
+#### Constructor
 
 ```go
 func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy) *EventStore
 ```
-Creates a new `EventStore` with the provided dispatcher, ring buffer size, and overrun policy.
 
-#### `Subscribe`
+Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 
-```go
-func (es *EventStore) Subscribe(ctx context.Context, e Event) error
-```
-Atomically enqueues an `Event` for later publication, applying back‑pressure according to `OverrunPolicy`. If `OverrunPolicy` is `ReturnError` and the buffer is full, the function returns `ErrBufferFull`.
+#### Methods
 
-#### `Publish`
+| Method | Description |
+|---|---|
+| `Subscribe(ctx, Event) error` | Enqueue an event; applies back-pressure per `OverrunPolicy` |
+| `Publish()` | Dispatch all pending events to their handlers |
+| `Use(Middleware)` | Append middleware to the chain |
+| `OnBefore(BeforeHook)` | Register a hook that runs before each handler |
+| `OnAfter(AfterHook)` | Register a hook that runs after each handler |
+| `OnError(ErrorHook)` | Register a hook that runs when a handler errors |
+| `Drain(ctx) error` | Wait for all async handlers; shuts down the worker pool |
+| `Close(ctx) error` | Alias for `Drain` |
+| `Metrics() (published, processed, errors uint64)` | Snapshot event counters |
+| `Schedule(ctx, time.Time, Event) *time.Timer` | Fire an event at a time |
+| `ScheduleAfter(ctx, time.Duration, Event) *time.Timer` | Fire an event after a duration |
 
-```go
-func (es *EventStore) Publish()
-```
-Dispatches all events from the last published position to the current head. If `Async` is true, handlers run in separate goroutines; otherwise they run in the caller's goroutine.
+#### `BeginTransaction() *Transaction`
 
-#### `Drain`
+Returns a `*Transaction` scoped to this store.
 
-```go
-func (es *EventStore) Drain(ctx context.Context) error
-```
-Blocks until all in-flight asynchronous handlers complete, then stops the worker pool. Returns an error if the provided context.Context is canceled or its deadline is exceeded.
+### `Transaction`
 
-#### `Close`
+| Method | Description |
+|---|---|
+| `Publish(Event)` | Buffer an event within the transaction |
+| `Commit(ctx) error` | Enqueue and process all buffered events; stops on first error |
+| `Rollback()` | Discard all buffered events |
 
-```go
-func (es *EventStore) Close(ctx context.Context) error
-```
-Drains all pending asynchronous handlers and shuts down the EventStore. Blocks until all in-flight handlers complete or the provided context.Context is canceled. Returns an error if the context’s deadline is exceeded or it is otherwise canceled.
-
-#### `Metrics`
-
-```go
-func (es *EventStore) Metrics() (published, processed, errors uint64)
-```
-Returns the total count of published, processed, and errored events.
-
-### `Schedule`
-
-```go
-func (es *EventStore) Schedule(ctx context.Context, t time.Time, e Event) *time.Timer
-```
-Schedules an Event to be subscribed and published at a specific time `t`.
-
-- [x] If `t` is in the future, the function returns a `*time.Timer` that can be used to cancel the event before it fires by using `timer.Stop()`.
-- [x] If `t` is in the past or is the current time, the event is executed immediately and synchronously, bypassing the event queue, and the function returns `nil`.
-
-### `ScheduleAfter`
-
-```go
-func (es *EventStore) ScheduleAfter(ctx context.Context, d time.Duration, e Event) *time.Timer
-```
-A convenience wrapper around `Schedule` that fires an event after a specified duration `d`.
-
-- [x] If the duration `d` is greater than zero, it returns a cancellable `*time.Timer`.
-- [x] If `d` is zero or negative, the event is executed immediately and synchronously, bypassing the event queue, and the function returns `nil`.
-
-## Back-pressure and Overrun Policies
-
-GoEventBus provides three strategies for handling a saturated ring buffer:
-
-| Policy       | Behaviour                                                                                     | When to use                                  |
-|--------------|------------------------------------------------------------------------------------------------|----------------------------------------------|
-| `DropOldest` | Atomically advances the read index, discarding the oldest event to make room for the new one. | Low‑latency scenarios where the newest data is most valuable and occasional loss is acceptable. |
-| `Block`      | Causes `Subscribe` to block (respecting its context) until space becomes available.           | Workloads that must not lose events but can tolerate the latency of back‑pressure. |
-| `ReturnError`| `Subscribe` returns `ErrBufferFull` immediately, allowing the caller to decide what to do.    | Pipelines where upstream logic controls retries and failures explicitly. |
-
-`DropOldest` is the default behaviour and matches releases prior to April 2025.
-
-## 💡 Use Cases
-
-GoEventBus is ideal for scenarios where low‑latency, high‑throughput, and non‑blocking event dispatching is needed:
-
-- 🔄 Real‑time event pipelines (e.g. analytics, telemetry)
-- 📥 Background task execution or job queues
-- 🧩 Microservice communication using in‑process events
-- ⚙️ Observability/event sourcing in domain‑driven designs
-- 🔁 In‑memory pub/sub for small‑scale distributed systems
-- 🎮 Game loops or simulations requiring lock‑free dispatching
+---
 
 ## Benchmarks
 
-All benchmarks were run with Go’s testing harness (`go test -bench .`) on an `-8` procs configuration. Numbers below are from the April 2025 release.
+Run on Apple M-series with `go test -bench . -benchtime=3s`:
 
-| Benchmark                         | Iterations   | ns/op  |
-|-----------------------------------|-------------:|-------:|
-| `BenchmarkSubscribe-8`            | 27,080,376   | 40.37  |
-| `BenchmarkSubscribeParallel-8`    | 26,418,999   | 38.42  |
-| `BenchmarkPublish-8`              | 295,661,464  | 3.910  |
-| `BenchmarkPublishAfterPrefill-8`  | 252,943,526  | 4.585  |
-| `BenchmarkSubscribeLargePayload-8`| 1,613,017    | 771.5  |
-| `BenchmarkPublishLargePayload-8`  | 296,434,225  | 3.910  |
-| `BenchmarkEventStore_Async-8`     | 2,816,988    | 436.5  |
-| `BenchmarkEventStore_Sync-8`      | 2,638,519    | 428.5  |
-| `BenchmarkFastHTTPSync-8`         | 6,275,112    | 163.8  |
-| `BenchmarkFastHTTPAsync-8`        | 1,954,884    | 662.0  |
-| `BenchmarkFastHTTPParallel-8`     | 4,489,274    | 262.3  |
+| Benchmark | Iterations | ns/op |
+|---|---:|---:|
+| `BenchmarkSubscribe` | 27,080,376 | 40.37 |
+| `BenchmarkSubscribeParallel` | 26,418,999 | 38.42 |
+| `BenchmarkPublish` | 295,661,464 | 3.91 |
+| `BenchmarkPublishAfterPrefill` | 252,943,526 | 4.59 |
+| `BenchmarkSubscribeLargePayload` | 1,613,017 | 771.5 |
+| `BenchmarkPublishLargePayload` | 296,434,225 | 3.91 |
+| `BenchmarkEventStore_Async` | 2,816,988 | 436.5 |
+| `BenchmarkEventStore_Sync` | 2,638,519 | 428.5 |
+| `BenchmarkFastHTTPSync` | 6,275,112 | 163.8 |
+| `BenchmarkFastHTTPAsync` | 1,954,884 | 662.0 |
+| `BenchmarkFastHTTPParallel` | 4,489,274 | 262.3 |
+
+---
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](github.com/Protocol-Lattice/GoEventBus/issues).
+Contributions, issues, and feature requests are welcome. See the [issues page](https://github.com/Protocol-Lattice/GoEventBus/issues) to get started.
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
-
+Distributed under the MIT License. See `LICENSE` for details.
