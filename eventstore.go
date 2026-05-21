@@ -3,6 +3,7 @@ package GoEventBus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -105,6 +106,9 @@ type EventStore struct {
 
 	// txMu serialises Rollback against concurrent Subscribe calls.
 	txMu sync.Mutex
+
+	// DLQ, when non-nil, receives every event that fails or panics during dispatch.
+	DLQ *DeadLetterQueue
 }
 
 // NewEventStore initializes a new EventStore. It spins up a default worker pool.
@@ -136,12 +140,7 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 func (es *EventStore) worker() {
 	for w := range es.workCh {
 		func(work eventWork) {
-			defer func() {
-				if r := recover(); r != nil {
-					atomic.AddUint64(&es.errorCount, 1)
-				}
-				es.wg.Done()
-			}()
+			defer es.wg.Done()
 			es.execute(work.handler, work.ev)
 		}(w)
 	}
@@ -237,11 +236,31 @@ func (es *EventStore) Publish() {
 }
 
 // execute runs the handler with middleware and hooks.
+// It recovers from panics, treating them as errors so the DLQ and error hooks
+// still fire and the caller (sync or worker goroutine) is never killed.
 func (es *EventStore) execute(h HandlerFunc, ev Event) {
 	ctx := ev.Ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			var panicErr error
+			if e, ok := r.(error); ok {
+				panicErr = fmt.Errorf("handler panic: %w", e)
+			} else {
+				panicErr = fmt.Errorf("handler panic: %v", r)
+			}
+			atomic.AddUint64(&es.errorCount, 1)
+			if es.DLQ != nil {
+				es.DLQ.add(DeadLetter{Event: ev, Err: panicErr, FailedAt: time.Now(), Attempts: 1})
+			}
+			for _, hook := range es.errorHooks {
+				hook(ctx, ev, panicErr)
+			}
+		}
+	}()
 
 	for _, hook := range es.beforeHooks {
 		hook(ctx, ev)
@@ -258,6 +277,9 @@ func (es *EventStore) execute(h HandlerFunc, ev Event) {
 	}
 	if err != nil {
 		atomic.AddUint64(&es.errorCount, 1)
+		if es.DLQ != nil {
+			es.DLQ.add(DeadLetter{Event: ev, Err: err, FailedAt: time.Now(), Attempts: 1})
+		}
 		for _, hook := range es.errorHooks {
 			hook(ctx, ev, err)
 		}
