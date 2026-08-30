@@ -131,6 +131,302 @@ func TestConcurrentSubscribe(t *testing.T) {
 	}
 }
 
+// TestEventStore_ReturnErrorIsBoundedUnderContention verifies that concurrent
+// producers can claim at most one slot each. A check-then-increment queue can
+// overrun this boundary and silently overwrite accepted events.
+func TestEventStore_ReturnErrorIsBoundedUnderContention(t *testing.T) {
+	const (
+		capacity  = 8
+		producers = 64
+		rounds    = 32
+	)
+
+	for round := 0; round < rounds; round++ {
+		seen := make(map[int]struct{}, capacity)
+		var seenMu sync.Mutex
+		dispatcher := Dispatcher{}
+		dispatcher.Register("event", func(_ context.Context, event Event) (Result, error) {
+			seenMu.Lock()
+			seen[event.Data.(int)] = struct{}{}
+			seenMu.Unlock()
+			return Result{}, nil
+		})
+		store := NewEventStore(&dispatcher, capacity, ReturnError)
+
+		start := make(chan struct{})
+		outcomes := make(chan error, producers)
+		var producersWG sync.WaitGroup
+		producersWG.Add(producers)
+		for producer := 0; producer < producers; producer++ {
+			producer := producer
+			go func() {
+				defer producersWG.Done()
+				<-start
+				outcomes <- store.Subscribe(context.Background(), Event{
+					ID:         strconv.Itoa(producer),
+					Projection: "event",
+					Data:       producer,
+				})
+			}()
+		}
+
+		close(start)
+		producersWG.Wait()
+		close(outcomes)
+
+		successes := 0
+		for err := range outcomes {
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, ErrBufferFull):
+			default:
+				t.Fatalf("round %d: Subscribe error = %v", round, err)
+			}
+		}
+		if successes != capacity {
+			t.Fatalf("round %d: accepted %d events; want exactly %d", round, successes, capacity)
+		}
+
+		store.Publish()
+		seenMu.Lock()
+		got := len(seen)
+		seenMu.Unlock()
+		if got != capacity {
+			t.Fatalf("round %d: dispatched %d distinct events; want %d", round, got, capacity)
+		}
+		if err := store.Close(context.Background()); err != nil {
+			t.Fatalf("round %d: Close: %v", round, err)
+		}
+	}
+}
+
+// TestEventStore_MPMCStressExactlyOnce exercises slot reuse while producers
+// and callers of Publish run concurrently. Every accepted event must reach a
+// handler once, never twice.
+func TestEventStore_MPMCStressExactlyOnce(t *testing.T) {
+	const (
+		producers         = 4
+		eventsPerProducer = 256
+		consumers         = 4
+		total             = producers * eventsPerProducer
+	)
+
+	seen := make(map[int]uint8, total)
+	var (
+		seenMu    sync.Mutex
+		duplicate bool
+	)
+	dispatcher := Dispatcher{}
+	dispatcher.Register("event", func(_ context.Context, event Event) (Result, error) {
+		id := event.Data.(int)
+		seenMu.Lock()
+		seen[id]++
+		duplicate = duplicate || seen[id] > 1
+		seenMu.Unlock()
+		return Result{}, nil
+	})
+	store := NewEventStore(&dispatcher, 64, Block)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	producersDone := make(chan struct{})
+	errs := make(chan error, producers)
+	var producersWG sync.WaitGroup
+	producersWG.Add(producers)
+	for producer := 0; producer < producers; producer++ {
+		producer := producer
+		go func() {
+			defer producersWG.Done()
+			<-start
+			for sequence := 0; sequence < eventsPerProducer; sequence++ {
+				id := producer*eventsPerProducer + sequence
+				if err := store.Subscribe(ctx, Event{
+					ID:         strconv.Itoa(id),
+					Projection: "event",
+					Data:       id,
+				}); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		producersWG.Wait()
+		close(producersDone)
+	}()
+
+	var consumersWG sync.WaitGroup
+	consumersWG.Add(consumers)
+	for consumer := 0; consumer < consumers; consumer++ {
+		go func() {
+			defer consumersWG.Done()
+			<-start
+			for {
+				store.Publish()
+				select {
+				case <-producersDone:
+					store.Publish()
+					return
+				default:
+				}
+			}
+		}()
+	}
+
+	close(start)
+	consumersWG.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	store.Publish()
+
+	seenMu.Lock()
+	got, duplicated := len(seen), duplicate
+	seenMu.Unlock()
+	if got != total || duplicated {
+		t.Fatalf("delivered %d/%d events, duplicate=%v", got, total, duplicated)
+	}
+	published, processed, errors := store.Metrics()
+	if published != total || processed != total || errors != 0 {
+		t.Fatalf("metrics = published:%d processed:%d errors:%d; want %d:%d:0", published, processed, errors, total, total)
+	}
+	if err := store.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestEventStore_CloseDrainsAcceptedEventsAndRejectsNewOnes(t *testing.T) {
+	const eventCount = 32
+	var processed atomic.Uint64
+	dispatcher := Dispatcher{}
+	dispatcher.Register("event", func(_ context.Context, _ Event) (Result, error) {
+		processed.Add(1)
+		return Result{}, nil
+	})
+	store := NewEventStore(&dispatcher, 64, DropOldest)
+	store.Async = true
+	for i := 0; i < eventCount; i++ {
+		if err := store.Subscribe(context.Background(), Event{Projection: "event"}); err != nil {
+			t.Fatalf("Subscribe(%d): %v", i, err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := store.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := processed.Load(); got != eventCount {
+		t.Fatalf("processed %d events; want %d", got, eventCount)
+	}
+	if err := store.Subscribe(context.Background(), Event{Projection: "event"}); !errors.Is(err, ErrEventStoreClosed) {
+		t.Fatalf("Subscribe after Close = %v; want ErrEventStoreClosed", err)
+	}
+}
+
+func TestEventStore_CloseUnblocksBlockedSubscribe(t *testing.T) {
+	dispatcher := Dispatcher{}
+	store := NewEventStore(&dispatcher, 1, Block)
+	if err := store.Subscribe(context.Background(), Event{}); err != nil {
+		t.Fatalf("initial Subscribe: %v", err)
+	}
+
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		close(started)
+		result <- store.Subscribe(context.Background(), Event{})
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := store.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrEventStoreClosed) {
+			t.Fatalf("blocked Subscribe = %v; want ErrEventStoreClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked Subscribe did not return after Close")
+	}
+}
+
+func TestEventStore_OrderedAsyncPreservesOrderAcrossConcurrentPublish(t *testing.T) {
+	type orderedEvent struct{ sequence int }
+
+	firstKeyEntered := make(chan struct{})
+	releaseFirstKey := make(chan struct{})
+	var (
+		sequences []int
+		mu        sync.Mutex
+	)
+	dispatcher := Dispatcher{}
+	store := NewEventStore(&dispatcher, 4, Block)
+	store.Async = true
+	store.RegisterOrdered("ordered", func(event Event) string {
+		if event.Data.(orderedEvent).sequence == 0 {
+			close(firstKeyEntered)
+			<-releaseFirstKey
+		}
+		return "same-key"
+	}, func(_ context.Context, event Event) (Result, error) {
+		mu.Lock()
+		sequences = append(sequences, event.Data.(orderedEvent).sequence)
+		mu.Unlock()
+		return Result{}, nil
+	})
+
+	if err := store.Subscribe(context.Background(), Event{Projection: "ordered", Data: orderedEvent{sequence: 0}}); err != nil {
+		t.Fatalf("Subscribe(first): %v", err)
+	}
+	firstPublishDone := make(chan struct{})
+	go func() {
+		store.Publish()
+		close(firstPublishDone)
+	}()
+	<-firstKeyEntered
+
+	if err := store.Subscribe(context.Background(), Event{Projection: "ordered", Data: orderedEvent{sequence: 1}}); err != nil {
+		t.Fatalf("Subscribe(second): %v", err)
+	}
+	secondPublishDone := make(chan struct{})
+	go func() {
+		store.Publish()
+		close(secondPublishDone)
+	}()
+
+	// The second Publish must not enqueue its later event while the first
+	// publisher is still choosing the ordering key for the earlier event.
+	secondOvertookFirst := false
+	select {
+	case <-secondPublishDone:
+		secondOvertookFirst = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseFirstKey)
+	<-firstPublishDone
+	<-secondPublishDone
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := store.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	mu.Lock()
+	got := append([]int(nil), sequences...)
+	mu.Unlock()
+	if secondOvertookFirst || len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("ordered delivery = %v, later Publish overtook first = %v", got, secondOvertookFirst)
+	}
+}
+
 // Benchmarks --------------------------------------------------------------
 
 func BenchmarkSubscribe(b *testing.B) {
@@ -447,10 +743,11 @@ func BenchmarkFastHTTPParallel(b *testing.B) {
 func TestPublishEmpty(t *testing.T) {
 	dispatcher := Dispatcher{}
 	es := NewEventStore(&dispatcher, 1<<16, DropOldest)
-	initialHead, initialTail := es.head, es.tail
+	initialPublished, initialProcessed, initialErrors := es.Metrics()
 	es.Publish()
-	if es.head != initialHead || es.tail != initialTail {
-		t.Errorf("counters changed: head %d->%d tail %d->%d", initialHead, es.head, initialTail, es.tail)
+	published, processed, errors := es.Metrics()
+	if published != initialPublished || processed != initialProcessed || errors != initialErrors {
+		t.Errorf("metrics changed: published %d->%d processed %d->%d errors %d->%d", initialPublished, published, initialProcessed, processed, initialErrors, errors)
 	}
 }
 

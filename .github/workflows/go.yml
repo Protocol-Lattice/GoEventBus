@@ -11,12 +11,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.22.2'
+        go-version: '1.23.7'
 
     - name: Clear Go Module Cache
       run: go clean -modcache
@@ -32,7 +32,7 @@ jobs:
     - name: Build
       run: go build -v ./...
 
-    - name: Run Tests with Coverage
+    - name: Run Tests with Race Detection and Coverage
       run: |
-        go test -v -coverprofile=coverage.out ./...
+        go test -race -v -coverprofile=coverage.out ./...
         go tool cover -func=coverage.out

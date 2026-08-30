@@ -52,6 +52,26 @@ func TestTransaction_CommitAndRollback(t *testing.T) {
 	}
 }
 
+func TestTransaction_RollbackPreservesIndependentStoreEvents(t *testing.T) {
+	var processed uint64
+	dispatcher := Dispatcher{
+		"p": hs(makeCounterHandler(&processed)),
+	}
+	store := NewEventStore(&dispatcher, 8, DropOldest)
+
+	tx := store.BeginTransaction()
+	tx.Publish(Event{ID: "transactional", Projection: "p"})
+	if err := store.Subscribe(context.Background(), Event{ID: "independent", Projection: "p"}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	tx.Rollback()
+	store.Publish()
+
+	if got := atomic.LoadUint64(&processed); got != 1 {
+		t.Fatalf("Rollback discarded an independent event: processed %d, want 1", got)
+	}
+}
+
 func TestTransaction_PartialFailure(t *testing.T) {
 	// handler that errors on the second event
 	cnt := uint64(0)

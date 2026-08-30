@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 // Result represents the outcome of an event handler.
@@ -28,12 +27,26 @@ const (
 	ReturnError
 )
 
-// ErrBufferFull is returned by Subscribe when OverrunPolicy==ReturnError and the ring buffer is saturated.
-var ErrBufferFull = errors.New("goeventbus: buffer is full")
+var (
+	// ErrBufferFull is returned by Subscribe when OverrunPolicy==ReturnError and the ring buffer is saturated.
+	ErrBufferFull = errors.New("goeventbus: buffer is full")
+	// ErrEventStoreClosed is returned by Subscribe after Drain or Close has
+	// started. Events accepted before that point are dispatched before Drain or
+	// Close returns successfully.
+	ErrEventStoreClosed = errors.New("goeventbus: event store is closed")
+)
 
 const cacheLine = 64
 
-type pad [cacheLine - unsafe.Sizeof(uint64(0))]byte
+type pad [cacheLine - 8]byte
+
+// ringSlot is a cell in the bounded MPMC ring. sequence owns publication of
+// event: a producer writes event before advancing sequence, and a consumer
+// reads event before releasing the slot for its next producer.
+type ringSlot struct {
+	sequence atomic.Uint64
+	event    Event
+}
 
 // HandlerFunc is the signature for event handlers and middleware.
 type HandlerFunc func(context.Context, Event) (Result, error)
@@ -105,16 +118,19 @@ type orderedQueue struct {
 	running bool
 }
 
-// EventStore is a high-performance, lock-free ring buffer with middleware and hooks support.
+// EventStore is a bounded MPMC ring buffer with middleware and hooks support.
+//
+// Subscribe and Publish are safe to call concurrently. Configuration methods
+// (Use, OnBefore, OnAfter, OnError, RegisterBatch, and RegisterOrdered) must
+// be called before concurrent use begins.
 type EventStore struct {
 	dispatcher *Dispatcher
 	size       uint64
-	buf        []atomic.Pointer[Event] // holds *Event pointers safely
-	events     []Event
+	slots      []ringSlot
 	_          pad
-	head       uint64 // write index
+	enqueuePos atomic.Uint64
 	_          pad
-	tail       uint64 // read index
+	dequeuePos atomic.Uint64
 
 	// Config flags
 	Async         bool
@@ -133,19 +149,22 @@ type EventStore struct {
 	orderedHandlers map[interface{}][]*orderedHandler
 
 	// Async worker pool
-	asyncWorkers   int
-	workCh         chan work
-	wg             sync.WaitGroup
-	shutdownOnce   sync.Once
-	shutdownSignal chan struct{}
+	asyncWorkers int
+	workCh       chan work
+	wg           sync.WaitGroup
+	// orderedDispatchMu establishes the enqueue order for ordered handlers
+	// across concurrent Publish calls.
+	orderedDispatchMu sync.Mutex
+	lifecycleMu       sync.Mutex
+	activeOps         sync.WaitGroup
+	shutdownOnce      sync.Once
+	shutdownDone      chan struct{}
+	closed            atomic.Bool
 
 	// Counters
 	publishedCount uint64
 	processedCount uint64
 	errorCount     uint64
-
-	// txMu serialises Rollback against concurrent Subscribe calls.
-	txMu sync.Mutex
 
 	// DLQ, when non-nil, receives every event that fails or panics during dispatch.
 	DLQ *DeadLetterQueue
@@ -162,14 +181,16 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 	es := &EventStore{
 		dispatcher:      dispatcher,
 		size:            bufferSize,
-		buf:             make([]atomic.Pointer[Event], bufferSize),
-		events:          make([]Event, bufferSize),
+		slots:           make([]ringSlot, bufferSize),
 		OverrunPolicy:   policy,
 		batchHandlers:   make(map[interface{}][]batchEntry),
 		orderedHandlers: make(map[interface{}][]*orderedHandler),
 		asyncWorkers:    runtime.NumCPU(),
 		workCh:          make(chan work, bufferSize),
-		shutdownSignal:  make(chan struct{}),
+		shutdownDone:    make(chan struct{}),
+	}
+	for i := range es.slots {
+		es.slots[i].sequence.Store(uint64(i) * 2)
 	}
 	// start worker pool
 	for i := 0; i < es.asyncWorkers; i++ {
@@ -220,8 +241,11 @@ func (es *EventStore) OnError(hook ErrorHook) {
 // can still be processed concurrently. Multiple ordered handlers registered
 // for the same projection are independent fan-out consumers.
 //
-// In synchronous mode all handlers are already invoked serially, so keyFn is
-// not called and handlers run as regular synchronous handlers.
+// Ordered enqueue is serialized across concurrent Publish calls, so a key
+// retains ring dequeue order in asynchronous mode. In synchronous mode,
+// handlers run in the caller goroutine; callers that need invocation ordering
+// must serialize their Publish calls. keyFn must not call Publish, Drain, or
+// Close on this store.
 func (es *EventStore) RegisterOrdered(projection interface{}, keyFn OrderingKeyFunc, handlers ...HandlerFunc) {
 	if keyFn == nil {
 		panic("GoEventBus: ordering key function must not be nil")
@@ -238,38 +262,133 @@ func (es *EventStore) RegisterOrdered(projection interface{}, keyFn OrderingKeyF
 	}
 }
 
-// Subscribe enqueues an Event, applying back-pressure according to OverrunPolicy.
+// enterOperation prevents shutdown from closing the worker channel while a
+// producer or dispatcher can still use it.
+func (es *EventStore) enterOperation() bool {
+	es.lifecycleMu.Lock()
+	defer es.lifecycleMu.Unlock()
+	if es.closed.Load() {
+		return false
+	}
+	es.activeOps.Add(1)
+	return true
+}
+
+// tryEnqueue inserts ev using per-slot sequence numbers. It is the bounded
+// MPMC algorithm: claiming a position does not make its event visible until
+// its slot sequence is advanced after the event write.
+func (es *EventStore) tryEnqueue(ev Event) bool {
+	pos := es.enqueuePos.Load()
+	for {
+		slot := &es.slots[pos&(es.size-1)]
+		sequence := slot.sequence.Load()
+		expected := pos * 2
+		diff := int64(sequence) - int64(expected)
+		switch {
+		case diff == 0:
+			if es.enqueuePos.CompareAndSwap(pos, pos+1) {
+				slot.event = ev
+				slot.sequence.Store(expected + 1)
+				return true
+			}
+		case diff < 0:
+			return false
+		}
+		pos = es.enqueuePos.Load()
+	}
+}
+
+// tryDequeue removes one event. A false result means the next FIFO position
+// has not yet been published or the ring is empty; a later Publish can retry.
+func (es *EventStore) tryDequeue() (Event, bool) {
+	pos := es.dequeuePos.Load()
+	for {
+		slot := &es.slots[pos&(es.size-1)]
+		sequence := slot.sequence.Load()
+		expected := pos*2 + 1
+		diff := int64(sequence) - int64(expected)
+		switch {
+		case diff == 0:
+			if es.dequeuePos.CompareAndSwap(pos, pos+1) {
+				ev := slot.event
+				slot.sequence.Store((pos + es.size) * 2)
+				return ev, true
+			}
+		case diff < 0:
+			return Event{}, false
+		}
+		pos = es.dequeuePos.Load()
+	}
+}
+
+// Subscribe enqueues an Event, applying back-pressure according to
+// OverrunPolicy. It returns ErrEventStoreClosed when Drain or Close has begun.
 func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
-	// record caller context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !es.enterOperation() {
+		return ErrEventStoreClosed
+	}
+	defer es.activeOps.Done()
+
 	e.Ctx = ctx
 	for {
-		head := atomic.LoadUint64(&es.head)
-		tail := atomic.LoadUint64(&es.tail)
-		if head-tail < es.size {
-			idx := atomic.AddUint64(&es.head, 1) - 1
-			slot := idx & (es.size - 1)
-			evPtr := &es.events[slot]
-			*evPtr = e
-			es.buf[slot].Store(evPtr)
+		if es.closed.Load() {
+			return ErrEventStoreClosed
+		}
+		if es.tryEnqueue(e) {
 			atomic.AddUint64(&es.publishedCount, 1)
 			return nil
 		}
-		// buffer full – resolve based on policy
+
 		switch es.OverrunPolicy {
 		case DropOldest:
-			atomic.AddUint64(&es.tail, 1)
-			continue
+			// Eviction is a regular dequeue claim, so it cannot race with a
+			// concurrent Publish and accidentally discard a new event.
+			if _, discarded := es.tryDequeue(); discarded {
+				continue
+			}
+			runtime.Gosched()
 		case ReturnError:
 			return ErrBufferFull
 		case Block:
-			runtime.Gosched()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(10 * time.Microsecond):
+			default:
+			}
+			timer := time.NewTimer(10 * time.Microsecond)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return ctx.Err()
+			case <-timer.C:
 			}
 		}
 	}
+}
+
+// takePending claims the currently available FIFO prefix. It intentionally
+// avoids allocating until it has actually claimed an event, keeping empty
+// Publish calls allocation-free even for large rings.
+func (es *EventStore) takePending() []Event {
+	ev, ok := es.tryDequeue()
+	if !ok {
+		return nil
+	}
+	events := make([]Event, 0, 16)
+	events = append(events, ev)
+	for {
+		ev, ok = es.tryDequeue()
+		if !ok {
+			break
+		}
+		events = append(events, ev)
+	}
+	return events
 }
 
 // Publish processes all pending events, applying middleware and hooks.
@@ -277,48 +396,55 @@ func (es *EventStore) Subscribe(ctx context.Context, e Event) error {
 // RegisterBatch receive events grouped by projection in chunks of up to their
 // configured size.
 func (es *EventStore) Publish() {
-	head := atomic.LoadUint64(&es.head)
-	tail := atomic.LoadUint64(&es.tail)
-	if tail == head {
+	if !es.enterOperation() {
+		return
+	}
+	defer es.activeOps.Done()
+
+	// An ordered handler's queue must be populated in dequeue order. Claiming
+	// and enqueueing ordered work under one lock prevents a later Publish from
+	// overtaking an earlier event between those two steps.
+	if es.Async && len(es.orderedHandlers) > 0 {
+		events, orderedWork := es.takeAndQueueOrdered()
+		es.submitOrdered(orderedWork)
+		es.dispatch(events, false)
+		return
+	}
+	es.dispatch(es.takePending(), true)
+}
+
+func (es *EventStore) dispatch(events []Event, dispatchOrdered bool) {
+	if len(events) == 0 {
 		return
 	}
 
 	disp := *es.dispatcher
-	mask := es.size - 1
 	hasBatch := len(es.batchHandlers) > 0
 
-	// batchGroups collects events per projection for batch dispatch.
 	var batchGroups map[interface{}][]Event
 	if hasBatch {
 		batchGroups = make(map[interface{}][]Event)
 	}
 
-	for i := tail; i < head; i++ {
-		p := es.buf[i&mask].Load()
-		if p == nil {
-			continue
-		}
-		ev := *p
+	for _, ev := range events {
 		if handlers, ok := disp[ev.Projection]; ok {
 			for _, handler := range handlers {
 				if es.Async {
 					es.wg.Add(1)
-					select {
-					case es.workCh <- work{kind: workSingle, handler: handler, ev: ev}:
-					case <-es.shutdownSignal:
-						es.wg.Done()
-					}
+					es.workCh <- work{kind: workSingle, handler: handler, ev: ev}
 				} else {
 					es.execute(handler, ev)
 				}
 			}
 		}
-		if handlers, ok := es.orderedHandlers[ev.Projection]; ok {
-			for _, handler := range handlers {
-				if es.Async {
-					es.enqueueOrdered(handler, ev)
-				} else {
-					es.execute(handler.handler, ev)
+		if dispatchOrdered {
+			if handlers, ok := es.orderedHandlers[ev.Projection]; ok {
+				for _, handler := range handlers {
+					if es.Async {
+						es.enqueueOrdered(handler, ev)
+					} else {
+						es.execute(handler.handler, ev)
+					}
 				}
 			}
 		}
@@ -329,12 +455,8 @@ func (es *EventStore) Publish() {
 		}
 	}
 
-	// Dispatch batch handlers in chunks.
 	for proj, entries := range es.batchHandlers {
 		events := batchGroups[proj]
-		if len(events) == 0 {
-			continue
-		}
 		for _, entry := range entries {
 			for start := 0; start < len(events); start += entry.size {
 				end := start + entry.size
@@ -344,25 +466,37 @@ func (es *EventStore) Publish() {
 				chunk := events[start:end]
 				if es.Async {
 					es.wg.Add(1)
-					select {
-					case es.workCh <- work{kind: workBatch, batchFn: entry.handler, events: chunk}:
-					case <-es.shutdownSignal:
-						es.wg.Done()
-					}
+					es.workCh <- work{kind: workBatch, batchFn: entry.handler, events: chunk}
 				} else {
 					es.executeBatch(entry.handler, chunk)
 				}
 			}
 		}
 	}
-
-	atomic.StoreUint64(&es.tail, head)
 }
 
-// enqueueOrdered appends ev to its handler/key queue. The first event in a
-// queue schedules one worker task; that task drains the queue serially. This
-// keeps a key ordered without dedicating a goroutine to every key.
-func (es *EventStore) enqueueOrdered(handler *orderedHandler, ev Event) {
+func (es *EventStore) queueOrderedEvents(events []Event) []work {
+	var workItems []work
+	for _, ev := range events {
+		for _, handler := range es.orderedHandlers[ev.Projection] {
+			if item, shouldStart := es.queueOrdered(handler, ev); shouldStart {
+				workItems = append(workItems, item)
+			}
+		}
+	}
+	return workItems
+}
+
+func (es *EventStore) takeAndQueueOrdered() ([]Event, []work) {
+	es.orderedDispatchMu.Lock()
+	defer es.orderedDispatchMu.Unlock()
+	events := es.takePending()
+	return events, es.queueOrderedEvents(events)
+}
+
+// queueOrdered appends ev to its handler/key queue. The caller schedules the
+// returned work only after it has released any ordering lock.
+func (es *EventStore) queueOrdered(handler *orderedHandler, ev Event) (work, bool) {
 	key := handler.keyFn(ev)
 
 	handler.mu.Lock()
@@ -374,21 +508,26 @@ func (es *EventStore) enqueueOrdered(handler *orderedHandler, ev Event) {
 	queue.events = append(queue.events, ev)
 	if queue.running {
 		handler.mu.Unlock()
-		return
+		return work{}, false
 	}
 	queue.running = true
 	handler.mu.Unlock()
 
-	es.wg.Add(1)
-	select {
-	case es.workCh <- work{kind: workOrdered, orderedHandler: handler, orderingKey: key}:
-	case <-es.shutdownSignal:
-		es.wg.Done()
-		// Drain has stopped dispatch. Mark the queue idle so it is not left in
-		// a misleading running state if a caller inspects it during shutdown.
-		handler.mu.Lock()
-		queue.running = false
-		handler.mu.Unlock()
+	return work{kind: workOrdered, orderedHandler: handler, orderingKey: key}, true
+}
+
+// enqueueOrdered appends ev to its handler/key queue and schedules the first
+// worker for that key. It is used only by the non-serialized fallback path.
+func (es *EventStore) enqueueOrdered(handler *orderedHandler, ev Event) {
+	if item, shouldStart := es.queueOrdered(handler, ev); shouldStart {
+		es.submitOrdered([]work{item})
+	}
+}
+
+func (es *EventStore) submitOrdered(workItems []work) {
+	for _, item := range workItems {
+		es.wg.Add(1)
+		es.workCh <- item
 	}
 }
 
@@ -416,7 +555,7 @@ func (es *EventStore) executeOrdered(handler *orderedHandler, key string) {
 // execute runs the handler with middleware and hooks.
 // It recovers from panics, treating them as errors so the DLQ and error hooks
 // still fire and the caller (sync or worker goroutine) is never killed.
-func (es *EventStore) execute(h HandlerFunc, ev Event) {
+func (es *EventStore) execute(h HandlerFunc, ev Event) (returnedErr error) {
 	ctx := ev.Ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -437,6 +576,7 @@ func (es *EventStore) execute(h HandlerFunc, ev Event) {
 			for _, hook := range es.errorHooks {
 				hook(ctx, ev, panicErr)
 			}
+			returnedErr = panicErr
 		}
 	}()
 
@@ -462,28 +602,51 @@ func (es *EventStore) execute(h HandlerFunc, ev Event) {
 			hook(ctx, ev, err)
 		}
 	}
+	return err
 }
 
-// Drain waits for all in-flight async handlers to complete, stopping new dispatch.
+// beginShutdown makes the transition from accepting work to closed exactly
+// once. It waits for operations already in progress, dispatches their pending
+// events, then closes workers only after no sender can remain.
+func (es *EventStore) beginShutdown() {
+	es.lifecycleMu.Lock()
+	es.closed.Store(true)
+	es.lifecycleMu.Unlock()
+
+	es.activeOps.Wait()
+	if es.Async && len(es.orderedHandlers) > 0 {
+		events, orderedWork := es.takeAndQueueOrdered()
+		es.submitOrdered(orderedWork)
+		es.dispatch(events, false)
+	} else {
+		es.dispatch(es.takePending(), true)
+	}
+	close(es.workCh)
+	es.wg.Wait()
+	close(es.shutdownDone)
+}
+
+// Drain stops accepting new events, dispatches events already accepted, and
+// waits for all asynchronous handlers to complete. A timed-out Drain leaves
+// shutdown in progress; a later Drain or Close can wait for the same result.
+// It must be called outside an EventStore handler, because waiting for the
+// current handler from that handler would deadlock.
 func (es *EventStore) Drain(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	es.shutdownOnce.Do(func() {
-		close(es.shutdownSignal)
-		close(es.workCh)
+		go es.beginShutdown()
 	})
-	done := make(chan struct{})
-	go func() {
-		es.wg.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
+	case <-es.shutdownDone:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// Close drains all pending async events and shuts down the EventStore.
+// Close is an alias for Drain.
 func (es *EventStore) Close(ctx context.Context) error {
 	return es.Drain(ctx)
 }
