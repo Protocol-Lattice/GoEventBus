@@ -289,6 +289,101 @@ func TestEventStore_AsyncDispatch(t *testing.T) {
 	}
 }
 
+func TestEventStore_OrderedAsyncPreservesOrderPerKey(t *testing.T) {
+	type orderEvent struct {
+		OrderID  string
+		Sequence int
+	}
+
+	dispatcher := Dispatcher{}
+	store := NewEventStore(&dispatcher, 1<<16, DropOldest)
+	store.Async = true
+
+	var (
+		mu        sync.Mutex
+		sequences = make(map[string][]int)
+	)
+	store.RegisterOrdered("order", func(ev Event) string {
+		return ev.Data.(orderEvent).OrderID
+	}, func(_ context.Context, ev Event) (Result, error) {
+		data := ev.Data.(orderEvent)
+		// Without ordered delivery, later events would be able to complete
+		// while the first event is still blocked.
+		if data.Sequence == 0 {
+			time.Sleep(25 * time.Millisecond)
+		}
+		mu.Lock()
+		sequences[data.OrderID] = append(sequences[data.OrderID], data.Sequence)
+		mu.Unlock()
+		return Result{}, nil
+	})
+
+	const count = 40
+	for i := 0; i < count; i++ {
+		if err := store.Subscribe(bg, Event{
+			Projection: "order",
+			Data:       orderEvent{OrderID: "order-a", Sequence: i},
+		}); err != nil {
+			t.Fatalf("Subscribe(order-a): %v", err)
+		}
+		if err := store.Subscribe(bg, Event{
+			Projection: "order",
+			Data:       orderEvent{OrderID: "order-b", Sequence: i},
+		}); err != nil {
+			t.Fatalf("Subscribe(order-b): %v", err)
+		}
+	}
+
+	store.Publish()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := store.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, orderID := range []string{"order-a", "order-b"} {
+		got := sequences[orderID]
+		if len(got) != count {
+			t.Fatalf("%s: handled %d events; want %d", orderID, len(got), count)
+		}
+		for i, sequence := range got {
+			if sequence != i {
+				t.Fatalf("%s: event at index %d has sequence %d; want %d", orderID, i, sequence, i)
+			}
+		}
+	}
+}
+
+func TestEventStore_OrderedHandlerUsesMiddlewareAndHooks(t *testing.T) {
+	dispatcher := Dispatcher{}
+	store := NewEventStore(&dispatcher, 8, DropOldest)
+
+	var before, after, middleware, handler int
+	store.OnBefore(func(context.Context, Event) { before++ })
+	store.OnAfter(func(context.Context, Event, Result, error) { after++ })
+	store.Use(func(next HandlerFunc) HandlerFunc {
+		return func(ctx context.Context, ev Event) (Result, error) {
+			middleware++
+			return next(ctx, ev)
+		}
+	})
+	store.RegisterOrdered("ordered", func(Event) string { return "key" }, func(context.Context, Event) (Result, error) {
+		handler++
+		return Result{}, nil
+	})
+
+	if err := store.Subscribe(bg, Event{Projection: "ordered"}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	store.Publish()
+
+	if before != 1 || after != 1 || middleware != 1 || handler != 1 {
+		t.Fatalf("before=%d after=%d middleware=%d handler=%d; want each 1", before, after, middleware, handler)
+	}
+}
+
 func BenchmarkEventStore_Async(b *testing.B) {
 	dispatcher := Dispatcher{"async": hs(func(_ context.Context, ev Event) (Result, error) { return Result{Message: "done"}, nil })}
 	store := NewEventStore(&dispatcher, 1<<16, DropOldest)

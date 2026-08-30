@@ -41,6 +41,11 @@ type HandlerFunc func(context.Context, Event) (Result, error)
 // Middleware wraps a HandlerFunc, returning a new HandlerFunc.
 type Middleware func(HandlerFunc) HandlerFunc
 
+// OrderingKeyFunc returns the partition key for an ordered handler. Events
+// with the same key are delivered to that handler in publish order when the
+// store is running asynchronously.
+type OrderingKeyFunc func(Event) string
+
 // Hook types for before, after, and error events.
 type BeforeHook func(context.Context, Event)
 type AfterHook func(context.Context, Event, Result, error)
@@ -71,14 +76,33 @@ type workKind uint8
 const (
 	workSingle workKind = iota
 	workBatch
+	workOrdered
 )
 
 type work struct {
-	kind    workKind
-	handler HandlerFunc      // workSingle
-	ev      Event            // workSingle
-	batchFn BatchHandlerFunc // workBatch
-	events  []Event          // workBatch
+	kind           workKind
+	handler        HandlerFunc      // workSingle
+	ev             Event            // workSingle
+	batchFn        BatchHandlerFunc // workBatch
+	events         []Event          // workBatch
+	orderedHandler *orderedHandler  // workOrdered
+	orderingKey    string           // workOrdered
+}
+
+// orderedHandler owns a serial queue for each ordering key. Queues are local
+// to a handler so separate ordered handlers remain independent fan-out
+// consumers.
+type orderedHandler struct {
+	handler HandlerFunc
+	keyFn   OrderingKeyFunc
+
+	mu     sync.Mutex
+	queues map[string]*orderedQueue
+}
+
+type orderedQueue struct {
+	events  []Event
+	running bool
 }
 
 // EventStore is a high-performance, lock-free ring buffer with middleware and hooks support.
@@ -104,6 +128,9 @@ type EventStore struct {
 
 	// Batch handlers (projection → []batchEntry); populated via RegisterBatch.
 	batchHandlers map[interface{}][]batchEntry
+
+	// Ordered handlers (projection → handlers); populated via RegisterOrdered.
+	orderedHandlers map[interface{}][]*orderedHandler
 
 	// Async worker pool
 	asyncWorkers   int
@@ -133,15 +160,16 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 		panic("GoEventBus: bufferSize must be a non-zero power of two")
 	}
 	es := &EventStore{
-		dispatcher:     dispatcher,
-		size:           bufferSize,
-		buf:            make([]atomic.Pointer[Event], bufferSize),
-		events:         make([]Event, bufferSize),
-		OverrunPolicy:  policy,
-		batchHandlers:  make(map[interface{}][]batchEntry),
-		asyncWorkers:   runtime.NumCPU(),
-		workCh:         make(chan work, bufferSize),
-		shutdownSignal: make(chan struct{}),
+		dispatcher:      dispatcher,
+		size:            bufferSize,
+		buf:             make([]atomic.Pointer[Event], bufferSize),
+		events:          make([]Event, bufferSize),
+		OverrunPolicy:   policy,
+		batchHandlers:   make(map[interface{}][]batchEntry),
+		orderedHandlers: make(map[interface{}][]*orderedHandler),
+		asyncWorkers:    runtime.NumCPU(),
+		workCh:          make(chan work, bufferSize),
+		shutdownSignal:  make(chan struct{}),
 	}
 	// start worker pool
 	for i := 0; i < es.asyncWorkers; i++ {
@@ -160,6 +188,8 @@ func (es *EventStore) worker() {
 				es.execute(w.handler, w.ev)
 			case workBatch:
 				es.executeBatch(w.batchFn, w.events)
+			case workOrdered:
+				es.executeOrdered(w.orderedHandler, w.orderingKey)
 			}
 		}(w)
 	}
@@ -183,6 +213,29 @@ func (es *EventStore) OnAfter(hook AfterHook) {
 // OnError registers a hook that runs only when a handler returns an error.
 func (es *EventStore) OnError(hook ErrorHook) {
 	es.errorHooks = append(es.errorHooks, hook)
+}
+
+// RegisterOrdered registers handlers whose events are processed in order for
+// each key returned by keyFn. In asynchronous mode, events with different keys
+// can still be processed concurrently. Multiple ordered handlers registered
+// for the same projection are independent fan-out consumers.
+//
+// In synchronous mode all handlers are already invoked serially, so keyFn is
+// not called and handlers run as regular synchronous handlers.
+func (es *EventStore) RegisterOrdered(projection interface{}, keyFn OrderingKeyFunc, handlers ...HandlerFunc) {
+	if keyFn == nil {
+		panic("GoEventBus: ordering key function must not be nil")
+	}
+	for _, handler := range handlers {
+		if handler == nil {
+			panic("GoEventBus: ordered handler must not be nil")
+		}
+		es.orderedHandlers[projection] = append(es.orderedHandlers[projection], &orderedHandler{
+			handler: handler,
+			keyFn:   keyFn,
+			queues:  make(map[string]*orderedQueue),
+		})
+	}
 }
 
 // Subscribe enqueues an Event, applying back-pressure according to OverrunPolicy.
@@ -260,6 +313,15 @@ func (es *EventStore) Publish() {
 				}
 			}
 		}
+		if handlers, ok := es.orderedHandlers[ev.Projection]; ok {
+			for _, handler := range handlers {
+				if es.Async {
+					es.enqueueOrdered(handler, ev)
+				} else {
+					es.execute(handler.handler, ev)
+				}
+			}
+		}
 		if hasBatch {
 			if _, ok := es.batchHandlers[ev.Projection]; ok {
 				batchGroups[ev.Projection] = append(batchGroups[ev.Projection], ev)
@@ -295,6 +357,60 @@ func (es *EventStore) Publish() {
 	}
 
 	atomic.StoreUint64(&es.tail, head)
+}
+
+// enqueueOrdered appends ev to its handler/key queue. The first event in a
+// queue schedules one worker task; that task drains the queue serially. This
+// keeps a key ordered without dedicating a goroutine to every key.
+func (es *EventStore) enqueueOrdered(handler *orderedHandler, ev Event) {
+	key := handler.keyFn(ev)
+
+	handler.mu.Lock()
+	queue := handler.queues[key]
+	if queue == nil {
+		queue = &orderedQueue{}
+		handler.queues[key] = queue
+	}
+	queue.events = append(queue.events, ev)
+	if queue.running {
+		handler.mu.Unlock()
+		return
+	}
+	queue.running = true
+	handler.mu.Unlock()
+
+	es.wg.Add(1)
+	select {
+	case es.workCh <- work{kind: workOrdered, orderedHandler: handler, orderingKey: key}:
+	case <-es.shutdownSignal:
+		es.wg.Done()
+		// Drain has stopped dispatch. Mark the queue idle so it is not left in
+		// a misleading running state if a caller inspects it during shutdown.
+		handler.mu.Lock()
+		queue.running = false
+		handler.mu.Unlock()
+	}
+}
+
+// executeOrdered drains one handler/key queue. New events added while an
+// event is executing are picked up by the same worker before it releases the
+// key, preserving FIFO delivery for that key.
+func (es *EventStore) executeOrdered(handler *orderedHandler, key string) {
+	for {
+		handler.mu.Lock()
+		queue := handler.queues[key]
+		if queue == nil || len(queue.events) == 0 {
+			delete(handler.queues, key)
+			handler.mu.Unlock()
+			return
+		}
+		ev := queue.events[0]
+		queue.events[0] = Event{} // release references held by the queue
+		queue.events = queue.events[1:]
+		handler.mu.Unlock()
+
+		es.execute(handler.handler, ev)
+	}
 }
 
 // execute runs the handler with middleware and hooks.

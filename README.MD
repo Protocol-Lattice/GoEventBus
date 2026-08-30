@@ -14,6 +14,7 @@ A high-performance, in-memory, lock-free event bus for Go — built on a cache-l
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Fan-out](#fan-out)
+- [Ordered Handlers](#ordered-handlers)
 - [Batch Handlers](#batch-handlers)
 - [Middleware](#middleware)
 - [Lifecycle Hooks](#lifecycle-hooks)
@@ -33,6 +34,7 @@ A high-performance, in-memory, lock-free event bus for Go — built on a cache-l
 
 - **Lock-free ring buffer** — atomic operations with cache-line padding keep dispatch sub-microsecond
 - **Fan-out dispatch** — register multiple independent handlers per projection; each runs its own middleware chain
+- **Ordered handlers** — preserve FIFO delivery for events with the same partition key, without giving up cross-key concurrency
 - **Batch handlers** — collect up to N events per projection and deliver them as a slice; ideal for bulk DB writes and HTTP batching
 - **Sync or async** — flip `store.Async = true` to hand work off to a fixed worker pool
 - **Middleware** — wrap handlers with logging, tracing, retries, or any cross-cutting behaviour
@@ -142,6 +144,35 @@ disp.Register("order.placed", analyticsTracker)
 ```
 
 In async mode each handler invocation becomes its own work item, so the four handlers above may run in parallel across the worker pool.
+
+---
+
+## Ordered Handlers
+
+Normal asynchronous handlers can run in any order. When a handler updates
+state for an entity, register it with `RegisterOrdered` to preserve the order
+of events that share an ordering key. Different keys are handled concurrently.
+
+```go
+type OrderEvent struct {
+    OrderID  string
+    Sequence int
+}
+
+store.Async = true
+store.RegisterOrdered("order.event", func(ev GoEventBus.Event) string {
+    return ev.Data.(OrderEvent).OrderID
+}, func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
+    event := ev.Data.(OrderEvent)
+    // For a given OrderID, sequence 0 always runs before sequence 1.
+    return applyOrderEvent(ctx, event)
+})
+```
+
+The queue is independent for every handler and key, so ordered handlers retain
+the usual fan-out behaviour. Middleware and lifecycle hooks apply normally.
+In synchronous mode handlers are already serial, so the ordering-key function
+is not evaluated.
 
 ---
 
@@ -555,6 +586,7 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 |---|---|
 | `Subscribe(ctx, Event) error` | Enqueue an event; applies back-pressure per `OverrunPolicy` |
 | `Publish()` | Dispatch all pending events to their handlers |
+| `RegisterOrdered(projection, OrderingKeyFunc, handlers...)` | Register handlers that preserve FIFO delivery for each key in async mode |
 | `RegisterBatch(projection, size, BatchHandlerFunc)` | Register a batch handler; events are delivered in chunks of up to `size` |
 | `Use(Middleware)` | Append middleware to the chain (applied to per-event handlers only) |
 | `OnBefore(BeforeHook)` | Register a hook that runs before each handler invocation |
