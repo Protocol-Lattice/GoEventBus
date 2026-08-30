@@ -4,7 +4,7 @@
 
 # GoEventBus
 
-A high-performance, in-memory, lock-free event bus for Go — built on a cache-line-padded atomic ring buffer with fan-out dispatch, middleware, lifecycle hooks, and back-pressure policies.
+A high-performance event bus for Go: an in-memory, lock-free core with Redis Streams and RabbitMQ providers for cross-process delivery.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Protocol-Lattice/GoEventBus)](https://goreportcard.com/report/github.com/Protocol-Lattice/GoEventBus)
 
@@ -20,6 +20,7 @@ A high-performance, in-memory, lock-free event bus for Go — built on a cache-l
 - [Lifecycle Hooks](#lifecycle-hooks)
 - [Back-pressure Policies](#back-pressure-policies)
 - [Async Mode](#async-mode)
+- [External Providers](#external-providers)
 - [Dead Letter Queue](#dead-letter-queue)
 - [Transactions](#transactions)
 - [Scheduling](#scheduling)
@@ -40,6 +41,7 @@ A high-performance, in-memory, lock-free event bus for Go — built on a cache-l
 - **Middleware** — wrap handlers with logging, tracing, retries, or any cross-cutting behaviour
 - **Lifecycle hooks** — `OnBefore`, `OnAfter`, `OnError` for observability without touching handler logic
 - **Back-pressure** — choose `DropOldest`, `Block`, or `ReturnError` per store
+- **External providers** — bridge events through Redis Streams or durable RabbitMQ topic exchanges
 - **Dead letter queue** — failed and panicking events are routed to an inspectable, replayable secondary store instead of being silently counted
 - **Transactions** — batch events and commit or roll back as a unit
 - **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
@@ -369,6 +371,93 @@ if err := store.Drain(ctx); err != nil {
 
 ---
 
+## External Providers
+
+The in-memory `EventStore` remains the local dispatcher. Providers let a
+process publish events to a broker or feed received broker events into that
+dispatcher:
+
+```go
+// Publish to a broker.
+err := provider.Publish(ctx, GoEventBus.Event{
+    ID:         "evt-42",
+    Projection: "order.created",
+    Data:       OrderCreated{OrderID: "ord-42"},
+})
+
+// Consume broker events into the local store. This blocks until ctx is cancelled.
+err = store.Consume(ctx, provider)
+```
+
+Remote providers use `JSONCodec` by default and therefore require a string
+`Projection`. `Data` is decoded as `map[string]any` by default. Supply a
+`JSONCodec{DecodePayload: ...}` in the provider configuration when handlers
+need a concrete payload type.
+
+### Redis Streams
+
+`RedisProvider` uses Redis Streams and a consumer group. Inject the Redis
+client so your application retains control of TLS, authentication, pooling,
+and its lifecycle.
+
+```go
+rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+provider, err := GoEventBus.NewRedisProvider(GoEventBus.RedisProviderConfig{
+    Client:   rdb,
+    Stream:   "events",
+    Group:    "billing",
+    Consumer: "billing-1",
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer provider.Close() // does not close rdb; it may be shared
+
+go func() {
+    if err := store.Consume(ctx, provider); err != nil && !errors.Is(err, context.Canceled) {
+        log.Printf("Redis consumer stopped: %v", err)
+    }
+}()
+```
+
+The provider acknowledges a stream entry after its consumer callback returns
+success. For `store.Consume`, that means the local store accepted the event;
+handler failures then use the local DLQ/error hooks rather than causing broker
+redelivery.
+
+### RabbitMQ
+
+`RabbitMQProvider` declares a durable topic exchange. Setting `Queue` also
+declares a durable queue and binds it using `BindingKey`; omit `Queue` for a
+publish-only provider. Publication waits for a RabbitMQ publisher confirm.
+
+```go
+provider, err := GoEventBus.NewRabbitMQProvider(GoEventBus.RabbitMQProviderConfig{
+    URL:        "amqp://guest:guest@localhost:5672/",
+    Exchange:   "events",
+    Queue:      "billing",
+    BindingKey: "order.*",
+    Consumer:   "billing-1",
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer provider.Close()
+
+if err := provider.Publish(ctx, GoEventBus.Event{
+    ID:         "evt-42",
+    Projection: "order.created", // RabbitMQ topic routing key
+    Data:       OrderCreated{OrderID: "ord-42"},
+}); err != nil {
+    log.Fatal(err)
+}
+```
+
+When calling a provider's `Consume` directly, return an error from the
+callback to leave the Redis message pending or requeue the RabbitMQ delivery.
+
+---
+
 ## Dead Letter Queue
 
 Attach a `DeadLetterQueue` to an `EventStore` and every event whose handler returns an error **or panics** is captured there instead of being silently swallowed into the error counter. Panics are wrapped as errors with full `errors.Is` / `errors.As` support when the original panic value was itself an `error`.
@@ -588,6 +677,7 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | `Publish()` | Dispatch all pending events to their handlers |
 | `RegisterOrdered(projection, OrderingKeyFunc, handlers...)` | Register handlers that preserve FIFO delivery for each key in async mode |
 | `RegisterBatch(projection, size, BatchHandlerFunc)` | Register a batch handler; events are delivered in chunks of up to `size` |
+| `Consume(ctx, Provider) error` | Receive broker events and enqueue them in the local store |
 | `Use(Middleware)` | Append middleware to the chain (applied to per-event handlers only) |
 | `OnBefore(BeforeHook)` | Register a hook that runs before each handler invocation |
 | `OnAfter(AfterHook)` | Register a hook that runs after each handler invocation |
@@ -598,6 +688,22 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | `Schedule(ctx, time.Time, Event) *time.Timer` | Fire an event at a time |
 | `ScheduleAfter(ctx, time.Duration, Event) *time.Timer` | Fire an event after a duration |
 | `BeginTransaction() *Transaction` | Returns a `*Transaction` scoped to this store |
+
+### `Provider`
+
+```go
+type Provider interface {
+    Publish(context.Context, Event) error
+    Consume(context.Context, EventConsumer) error
+    Close() error
+}
+```
+
+`RedisProvider` is created with `NewRedisProvider(RedisProviderConfig)` and
+uses Redis Streams consumer groups. `RabbitMQProvider` is created with
+`NewRabbitMQProvider(RabbitMQProviderConfig)` and uses durable RabbitMQ topic
+exchange/queue topology. Both use `JSONCodec` unless a custom `EventCodec` is
+provided.
 
 ### `DeadLetter`
 
