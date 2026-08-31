@@ -45,7 +45,6 @@ func TestRedisProviderIntegration(t *testing.T) {
 		Stream:   stream,
 		Group:    group,
 		Consumer: "consumer-1",
-		StartID:  "0",
 		Block:    100 * time.Millisecond,
 		Count:    1,
 	})
@@ -59,11 +58,23 @@ func TestRedisProviderIntegration(t *testing.T) {
 		Projection: "orders.created",
 		Data:       map[string]any{"order_id": "o-42"},
 	}
+	delivered, consumeErr := consumeProvider(t, ctx, provider)
+	waitFor(t, ctx, "Redis consumer group", func() (bool, error) {
+		groups, err := client.XInfoGroups(ctx, stream).Result()
+		if err != nil {
+			return false, nil
+		}
+		for _, info := range groups {
+			if info.Name == group {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
 	if err := provider.Publish(ctx, want); err != nil {
 		t.Fatalf("publish Redis event: %v", err)
 	}
 
-	delivered, consumeErr := consumeProvider(t, ctx, provider)
 	assertDeliveredEvent(t, receiveEvent(t, ctx, delivered, consumeErr), want)
 	waitFor(t, ctx, "Redis acknowledgement", func() (bool, error) {
 		pending, err := client.XPending(ctx, stream, group).Result()
