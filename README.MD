@@ -43,7 +43,7 @@ A high-performance event bus for Go: an in-memory, lock-free core with Redis Str
 - **Back-pressure** — choose `DropOldest`, `Block`, or `ReturnError` per store
 - **External providers** — bridge events through Redis Streams or durable RabbitMQ topic exchanges
 - **Dead letter queue** — failed and panicking events are routed to an inspectable, replayable secondary store instead of being silently counted
-- **Transactions** — batch events and commit or roll back as a unit
+- **Transactions** — buffer events locally, then synchronously commit or discard them
 - **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
 - **Metrics** — published, processed, and error counters via a single call
 
@@ -542,7 +542,7 @@ fmt.Println(dl.Err) // "handler panic: something went wrong"
 
 ## Transactions
 
-Group multiple events into a single commit. If any handler returns an error, `Commit` stops and returns that error. Call `Rollback` to discard buffered events without publishing.
+Transactions are local event buffers, not atomic transactions. `Commit` delivers the buffered events synchronously and stops at the first handler error. `Rollback` discards the local buffer, but cannot undo side effects from handlers that already ran before a failed commit.
 
 ```go
 type OrderPayload struct{ OrderID string }
@@ -736,8 +736,8 @@ Attach to a store via `store.DLQ = GoEventBus.NewDeadLetterQueue()`. When `DLQ` 
 | Method | Description |
 |---|---|
 | `Publish(Event)` | Buffer an event within the transaction |
-| `Commit(ctx) error` | Enqueue and process all buffered events; stops on first error |
-| `Rollback()` | Discard all buffered events |
+| `Commit(ctx) error` | Deliver buffered events synchronously; stop on the first handler error |
+| `Rollback()` | Discard the local buffer; does not undo completed handler side effects |
 
 ---
 

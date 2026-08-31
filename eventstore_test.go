@@ -883,7 +883,9 @@ func BenchmarkSubscribePublish(b *testing.B) {
 // TestContextPropagation verifies that a context passed to Subscribe
 // is forwarded to the handler.
 func TestContextPropagation(t *testing.T) {
-	const key, val = "myKey", "myVal"
+	type contextKey struct{}
+	const val = "myVal"
+	key := contextKey{}
 
 	ctx := context.WithValue(context.Background(), key, val)
 

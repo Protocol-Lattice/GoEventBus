@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  quality:
     runs-on: ubuntu-latest
 
     steps:
@@ -17,22 +17,49 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.23.7'
+        cache: true
 
-    - name: Clear Go Module Cache
-      run: go clean -modcache
+    - name: Download modules
+      run: go mod download
 
-    - name: Install dependencies
-      run: |
-        go get github.com/lib/pq
-        go get github.com/gorilla/mux
+    - name: Run go vet
+      run: go vet -tags=integration ./...
 
-    - name: Tidy and install modules
-      run: go mod tidy
+    - name: Run staticcheck
+      uses: dominikh/staticcheck-action@v1
+      with:
+        version: '2025.1.1'
+        install-go: false
+        build-tags: integration
 
-    - name: Build
-      run: go build -v ./...
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23.7'
+        cache: true
 
     - name: Run Tests with Race Detection and Coverage
       run: |
         go test -race -v -coverprofile=coverage.out ./...
         go tool cover -func=coverage.out
+
+  integration-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23.7'
+        cache: true
+
+    - name: Run integration tests
+      run: go test -race -tags=integration -timeout=5m -v ./...
