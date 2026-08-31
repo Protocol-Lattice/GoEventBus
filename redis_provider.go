@@ -191,6 +191,23 @@ func (p *RedisProvider) consumePending(ctx context.Context, consumer EventConsum
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// ID 0 only resumes messages already pending for this consumer. Check
+		// first so a new consumer can proceed directly to fresh messages.
+		consumers, err := p.client.XInfoConsumers(ctx, p.stream, p.group).Result()
+		if err != nil {
+			return fmt.Errorf("goeventbus: inspect Redis consumers: %w", err)
+		}
+		pending := false
+		for _, info := range consumers {
+			if info.Name == p.consumer {
+				pending = info.Pending > 0
+				break
+			}
+		}
+		if !pending {
+			return nil
+		}
+
 		streams, err := p.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    p.group,
 			Consumer: p.consumer,
