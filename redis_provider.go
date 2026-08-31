@@ -196,6 +196,10 @@ func (p *RedisProvider) consumePending(ctx context.Context, consumer EventConsum
 			Consumer: p.consumer,
 			Streams:  []string{p.stream, "0"},
 			Count:    p.count,
+			// A pending-message scan must return immediately when there are no
+			// pending entries. go-redis emits BLOCK 0 for its zero value, which
+			// would wait indefinitely before Consume reached new messages.
+			Block: -1,
 		}).Result()
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
