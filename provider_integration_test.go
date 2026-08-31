@@ -152,11 +152,21 @@ func consumeProvider(t *testing.T, parent context.Context, provider Provider) (<
 		cancel()
 		select {
 		case err := <-consumeErr:
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				t.Errorf("Consume returned %v after cancellation, want context cancellation", err)
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrProviderClosed) {
+				t.Errorf("Consume returned %v after shutdown", err)
+			}
+			return
+		case <-time.After(time.Second):
+		}
+
+		_ = provider.Close()
+		select {
+		case err := <-consumeErr:
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrProviderClosed) {
+				t.Errorf("Consume returned %v after forced shutdown", err)
 			}
 		case <-time.After(5 * time.Second):
-			t.Error("Consume did not stop after cancellation")
+			t.Error("Consume did not stop after forced shutdown")
 		}
 	})
 	return delivered, consumeErr
