@@ -31,7 +31,7 @@ func TestRedisProviderIntegration(t *testing.T) {
 		t.Fatalf("start Redis container: %v", err)
 	}
 
-	endpoint, err := container.Endpoint(ctx, "6379/tcp")
+	endpoint, err := container.PortEndpoint(ctx, "6379/tcp", "")
 	if err != nil {
 		t.Fatalf("get Redis endpoint: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRabbitMQProviderIntegration(t *testing.T) {
 		t.Fatalf("start RabbitMQ container: %v", err)
 	}
 
-	endpoint, err := container.Endpoint(ctx, "5672/tcp")
+	endpoint, err := container.PortEndpoint(ctx, "5672/tcp", "")
 	if err != nil {
 		t.Fatalf("get RabbitMQ endpoint: %v", err)
 	}
