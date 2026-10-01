@@ -1,55 +1,73 @@
 <p align="center">
-  <img src="https://github.com/Protocol-Lattice/GoEventBus/blob/main/logo2025.png?raw=true">
+  <img src="https://github.com/Protocol-Lattice/GoEventBus/blob/main/logo2025.png?raw=true" alt="GoEventBus">
 </p>
 
 # GoEventBus
 
-A high-performance event bus for Go: an in-memory, lock-free core with Redis Streams and RabbitMQ providers for cross-process delivery.
+**A high-performance event bus for Go with deterministic rules, cached decisions, and optional Jev-powered event routing.**
+
+GoEventBus combines a bounded MPMC in-memory event bus with fan-out, ordered and batch handlers, middleware, lifecycle hooks, dead-letter handling, Redis Streams, RabbitMQ, and an optional decision layer for choosing which event type should execute.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Protocol-Lattice/GoEventBus)](https://goreportcard.com/report/github.com/Protocol-Lattice/GoEventBus)
 
-## Table of Contents
+```text
+                           ┌──────────────┐
+                           │    Rules     │
+                           └──────┬───────┘
+                                  │ no match
+                                  ▼
+Event state ───────────────► ┌──────────────┐
+                             │    Cache     │
+                             └──────┬───────┘
+                                    │ miss
+                                    ▼
+                             ┌──────────────┐
+                             │     Jev      │
+                             └──────┬───────┘
+                                    │
+                                    ▼
+                             selected event type
+                                    │
+                                    ▼
+Subscribe ─► MPMC ring ─► Publish ─► handlers
+                         ├─────────► ordered handlers
+                         └─────────► batch handlers
+```
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Jev Event Routing](#jev-event-routing)
-- [Fan-out](#fan-out)
-- [Ordered Handlers](#ordered-handlers)
-- [Batch Handlers](#batch-handlers)
-- [Middleware](#middleware)
-- [Lifecycle Hooks](#lifecycle-hooks)
-- [Back-pressure Policies](#back-pressure-policies)
-- [Async Mode](#async-mode)
-- [External Providers](#external-providers)
-- [Dead Letter Queue](#dead-letter-queue)
-- [Transactions](#transactions)
-- [Scheduling](#scheduling)
-- [API Reference](#api-reference)
-- [Benchmarks](#benchmarks)
-- [Contributing](#contributing)
-- [License](#license)
+The decision layer is optional. If you already know the event type, call `Subscribe` directly and GoEventBus behaves like a normal high-performance event bus.
 
----
+## Why GoEventBus?
+
+Most events do not need model inference. Some do.
+
+GoEventBus keeps those paths separate:
+
+- **Known event type** → enqueue it directly.
+- **Obvious rule** → route deterministically.
+- **Repeated decision** → reuse the cached choice.
+- **Ambiguous input** → ask Jev to choose from a bounded candidate set.
+- **Execution** → always stays inside GoEventBus.
+
+That gives you intelligent routing without putting an LLM call in the `Publish()` hot path.
 
 ## Features
 
-- **Lock-free ring buffer** — atomic operations with cache-line padding keep dispatch sub-microsecond
-- **Fan-out dispatch** — register multiple independent handlers per projection; each runs its own middleware chain
-- **Ordered handlers** — preserve FIFO delivery for events with the same partition key, without giving up cross-key concurrency
-- **Batch handlers** — collect up to N events per projection and deliver them as a slice; ideal for bulk DB writes and HTTP batching
-- **Sync or async** — flip `store.Async = true` to hand work off to a fixed worker pool
-- **Middleware** — wrap handlers with logging, tracing, retries, or any cross-cutting behaviour
-- **Lifecycle hooks** — `OnBefore`, `OnAfter`, `OnError` for observability without touching handler logic
-- **Back-pressure** — choose `DropOldest`, `Block`, or `ReturnError` per store
-- **External providers** — bridge events through Redis Streams or durable RabbitMQ topic exchanges
-- **Dead letter queue** — failed and panicking events are routed to an inspectable, replayable secondary store instead of being silently counted
-- **Transactions** — buffer events locally, then synchronously commit or discard them
-- **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
-- **Rules + cached Jev routing** — deterministic rules first, TTL decision cache second, Jev fallback only for unresolved event types
-- **Metrics** — published, processed, and error counters via a single call
-
----
+- **Bounded MPMC ring buffer** built with atomics and cache-line padding.
+- **Rules → cache → Jev routing** for optional intelligent event selection.
+- **Typed or string projections** for local dispatch.
+- **Fan-out handlers** with independent execution.
+- **Ordered handlers** with FIFO delivery per ordering key.
+- **Batch handlers** for bulk writes and high-throughput pipelines.
+- **Sync and async dispatch** with a fixed worker pool.
+- **Middleware** for per-handler cross-cutting behavior.
+- **Lifecycle hooks** with `OnBefore`, `OnAfter`, and `OnError`.
+- **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
+- **Dead-letter queue** with replay support and panic recovery.
+- **Redis Streams and RabbitMQ providers** for cross-process delivery.
+- **Transactions** with local buffering and synchronous commit.
+- **Scheduling** with absolute and relative timers.
+- **Metrics** for published, processed, and failed events.
+- **Pluggable decision cache** through the `DecisionCache` interface.
 
 ## Installation
 
@@ -57,11 +75,15 @@ A high-performance event bus for Go: an in-memory, lock-free core with Redis Str
 go get github.com/Protocol-Lattice/GoEventBus
 ```
 
-Requires Go 1.21+.
+GoEventBus currently targets **Go 1.23+**.
 
 ---
 
-## Quick Start
+# Quick Start
+
+## Plain event bus
+
+Use the direct path when the event type is already known.
 
 ```go
 package main
@@ -71,94 +93,162 @@ import (
     "fmt"
     "log"
 
-    "github.com/Protocol-Lattice/GoEventBus"
+    GoEventBus "github.com/Protocol-Lattice/GoEventBus"
 )
 
-type UserCreatedPayload struct{ ID string }
-type HouseWasSold struct{}
-type HouseSoldPayload struct {
-    Address string
-    Price   int
+type UserCreated struct {
+    ID string
 }
 
 func main() {
-    disp := GoEventBus.Dispatcher{}
+    dispatcher := GoEventBus.Dispatcher{}
 
-    disp.Register("user_created", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-        p := ev.Data.(UserCreatedPayload)
-        fmt.Println("User created:", p.ID)
+    dispatcher.Register("user.created", func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        payload := ev.Data.(UserCreated)
+        fmt.Println("user created:", payload.ID)
         return GoEventBus.Result{Message: "ok"}, nil
     })
 
-    disp.Register(HouseWasSold{}, func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-        p := ev.Data.(HouseSoldPayload)
-        fmt.Printf("House sold at %s for $%d\n", p.Address, p.Price)
-        return GoEventBus.Result{Message: "ok"}, nil
-    })
-
-    store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
+    store := GoEventBus.NewEventStore(
+        &dispatcher,
+        1<<16,
+        GoEventBus.DropOldest,
+    )
     store.Async = true
 
-    _ = store.Subscribe(context.Background(), GoEventBus.Event{
-        ID:         "evt1",
-        Projection: "user_created",
-        Data:       UserCreatedPayload{ID: "u-42"},
-    })
-    _ = store.Subscribe(context.Background(), GoEventBus.Event{
-        ID:         "evt2",
-        Projection: HouseWasSold{},
-        Data:       HouseSoldPayload{Address: "1 Main St", Price: 500_000},
-    })
+    if err := store.Subscribe(context.Background(), GoEventBus.Event{
+        ID:         "evt-1",
+        Projection: "user.created",
+        Data:       UserCreated{ID: "u-42"},
+    }); err != nil {
+        log.Fatal(err)
+    }
 
     store.Publish()
 
     if err := store.Drain(context.Background()); err != nil {
         log.Fatal(err)
     }
-
-    published, processed, errors := store.Metrics()
-    fmt.Printf("published=%d processed=%d errors=%d\n", published, processed, errors)
 }
 ```
 
-**Key points:**
-
-- `Projection` can be any comparable value — a string, a struct, an integer.
-- `Data` carries the type-safe payload; assert it inside the handler.
-- Pass the context your handler should respect to `Subscribe`; it is forwarded to every handler.
+`Projection` may be any comparable value for local dispatch, including a string or a typed struct.
 
 ---
 
-## Jev Event Routing
+# Intelligent Event Routing
 
-GoEventBus can use [TypeSafe Jev](https://openrouter.ai/typesafe/jev-1.13) as an optional decision layer before enqueueing an event. For production routing, wrap Jev with `RuleCacheSelector`:
+GoEventBus can choose an event type before enqueueing it.
+
+The recommended pipeline is:
 
 ```text
-rules -> cache -> Jev -> cache write -> Subscribe -> Publish -> handler
+rules → cache → Jev → cache write → Subscribe → Publish
 ```
 
-Rules are evaluated first and the first match wins. If no rule matches, the selector checks a TTL cache. Jev is only called on a cache miss.
+This keeps the fast path deterministic and only calls Jev when local logic cannot resolve the event type.
+
+## 1. Define candidates
+
+```go
+type HouseWasSold struct{}
+
+candidates := []GoEventBus.EventCandidate{
+    {
+        Key:         "user_created",
+        Projection:  "user.created",
+        Description: "A new user account was created",
+    },
+    {
+        Key:         "house_sold",
+        Projection:  HouseWasSold{},
+        Description: "A property sale was completed",
+    },
+    {
+        Key:         "order_cancelled",
+        Projection:  "order.cancelled",
+        Description: "An existing order should be cancelled",
+    },
+}
+```
+
+`Key` is the stable identifier exposed to the decision layer. `Projection` is the real GoEventBus dispatcher key.
+
+That separation lets Jev choose between simple string keys while the event bus can still dispatch to typed projections.
+
+## 2. Add deterministic rules
+
+Rules run first. The first matching rule wins.
+
+```go
+rules := []GoEventBus.EventRule{
+    {
+        Name:   "explicit-cancel",
+        Choice: "order_cancelled",
+        Match: func(
+            _ context.Context,
+            state any,
+            _ []GoEventBus.EventCandidate,
+        ) bool {
+            input, ok := state.(map[string]any)
+            return ok && input["action"] == "cancel"
+        },
+    },
+}
+```
+
+Rules are intentionally evaluated before cache. Adding a new rule can therefore override an older cached model decision immediately.
+
+## 3. Add a decision cache
+
+```go
+cache := GoEventBus.NewMemoryDecisionCache(5 * time.Minute)
+```
+
+The built-in cache is goroutine-safe and lazily expires entries.
+
+The default cache key is a SHA-256 hash of:
+
+- the JSON-serializable decision state,
+- candidate keys,
+- candidate descriptions.
+
+Candidate ordering does not change the key. Projection values are deliberately excluded because typed projections may not be JSON-serializable.
+
+Need a different strategy? Supply `RuleCacheSelector.CacheKey`.
+
+## 4. Use Jev as the fallback
 
 ```go
 jev := &GoEventBus.JevSelector{
     APIKey: os.Getenv("OPENROUTER_API_KEY"),
 }
+```
 
+The default model is:
+
+```text
+typesafe/jev-1.13
+```
+
+The adapter calls OpenRouter's Decisions API using the Go standard library, so the Jev integration adds no SDK dependency.
+
+## 5. Compose the router
+
+```go
 selector := &GoEventBus.RuleCacheSelector{
-    Rules: []GoEventBus.EventRule{
-        {
-            Name:   "explicit-cancel",
-            Choice: "order_cancelled",
-            Match: func(_ context.Context, state any, _ []GoEventBus.EventCandidate) bool {
-                input, ok := state.(map[string]any)
-                return ok && input["action"] == "cancel"
-            },
-        },
-    },
-    Cache:    GoEventBus.NewMemoryDecisionCache(5 * time.Minute),
+    Rules:    rules,
+    Cache:    cache,
     Fallback: jev,
 }
+```
 
+Then route and enqueue:
+
+```go
 state := map[string]any{
     "message": "The property at 1 Main St was sold for $500000",
 }
@@ -168,74 +258,111 @@ decision, err := store.DecideAndSubscribe(
     selector,
     state,
     GoEventBus.Event{
-        ID:   "evt3",
-        Data: HouseSoldPayload{Address: "1 Main St", Price: 500_000},
+        ID: "evt-2",
     },
-    []GoEventBus.EventCandidate{
-        {
-            Key:         "user_created",
-            Projection:  "user_created",
-            Description: "A new user account was created",
-        },
-        {
-            Key:         "house_sold",
-            Projection:  HouseWasSold{},
-            Description: "A property sale was completed",
-        },
-        {
-            Key:         "order_cancelled",
-            Projection:  "order_cancelled",
-            Description: "An existing order should be cancelled",
-        },
-    },
+    candidates,
 )
 if err != nil {
     log.Fatal(err)
 }
 
-fmt.Printf("selected=%s confidence=%.2f\n", decision.Choice, decision.Confidence)
+fmt.Printf(
+    "choice=%s confidence=%.2f probabilities=%v\n",
+    decision.Choice,
+    decision.Confidence,
+    decision.Probabilities,
+)
+
 store.Publish()
 ```
 
-`EventCandidate.Key` is the stable string exposed to the decision layer, while `Projection` remains the real dispatcher key. This keeps routing compatible with both string projections and typed struct projections.
+If a rule matches, Jev is never called. If the same decision state is already cached, Jev is never called. Only a cache miss reaches the model.
 
-`MemoryDecisionCache` is goroutine-safe and lazily expires entries. A TTL of zero or less disables expiration. The default cache key hashes the JSON-serializable state plus candidate keys and descriptions; candidate order does not affect the key. For application-specific semantics, set `RuleCacheSelector.CacheKey`.
+## Cache behavior
 
-`DecisionCache` is an interface, so a Redis or distributed cache can be plugged in without changing the router. Cache failures are fail-open by default because cache is an optimization; set `StrictCache: true` when cache failures should fail the routing call.
+`DecisionCache` is intentionally small:
 
-The Jev integration calls OpenRouter's Decisions API directly with the standard library, so it adds no Go module dependency. The default model is `typesafe/jev-1.13`. Override `JevSelector.Model`, `Endpoint`, `Instructions`, or `Client` when needed.
+```go
+type DecisionCache interface {
+    Get(context.Context, string) (EventDecision, bool, error)
+    Set(context.Context, string, EventDecision) error
+}
+```
 
-The existing explicit `Subscribe` API is unchanged, so deterministic application code can bypass model-based routing entirely.
+That makes it straightforward to implement Redis, distributed, persistent, or application-specific caches.
+
+Cache failures are **fail-open by default**. Routing continues through the fallback selector because cache is treated as an optimization.
+
+Set:
+
+```go
+StrictCache: true
+```
+
+when cache failures should fail the routing call instead.
 
 ---
 
-## Fan-out
-
-`Register` accumulates handlers. Every handler registered for a projection is called in order for each dispatched event. Handlers are fully independent — an error in one does not prevent the others from running.
+# Core Event Model
 
 ```go
-disp := GoEventBus.Dispatcher{}
+type Event struct {
+    ID         string
+    Projection interface{}
+    Data       any
+    Args       map[string]any // deprecated
+}
+```
 
-// Register as many handlers as you need for the same projection.
-disp.Register("order.placed",
+Prefer `Data` for payloads. `Args` remains for backwards compatibility.
+
+Handlers use:
+
+```go
+type HandlerFunc func(
+    context.Context,
+    Event,
+) (Result, error)
+```
+
+Register handlers with a `Dispatcher`:
+
+```go
+dispatcher := GoEventBus.Dispatcher{}
+
+dispatcher.Register(
+    "order.created",
+    handleBilling,
+    handleAnalytics,
+)
+```
+
+Calling `Register` repeatedly for the same projection appends handlers rather than replacing them.
+
+---
+
+# Fan-out
+
+Multiple handlers may subscribe to the same projection.
+
+```go
+dispatcher.Register(
+    "order.placed",
     auditLogger,
     inventoryReducer,
     notificationSender,
 )
-
-// Register can also be called incrementally across different packages.
-disp.Register("order.placed", analyticsTracker)
 ```
 
-In async mode each handler invocation becomes its own work item, so the four handlers above may run in parallel across the worker pool.
+Each handler is independent. One handler returning an error does not prevent the other fan-out handlers from running.
+
+In async mode, each regular handler invocation becomes its own worker-pool item.
 
 ---
 
-## Ordered Handlers
+# Ordered Handlers
 
-Normal asynchronous handlers can run in any order. When a handler updates
-state for an entity, register it with `RegisterOrdered` to preserve the order
-of events that share an ordering key. Different keys are handled concurrently.
+Use ordered handlers when events for the same entity must be processed sequentially while unrelated entities can still run concurrently.
 
 ```go
 type OrderEvent struct {
@@ -243,554 +370,174 @@ type OrderEvent struct {
     Sequence int
 }
 
-store.Async = true
-store.RegisterOrdered("order.event", func(ev GoEventBus.Event) string {
-    return ev.Data.(OrderEvent).OrderID
-}, func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-    event := ev.Data.(OrderEvent)
-    // For a given OrderID, sequence 0 always runs before sequence 1.
-    return applyOrderEvent(ctx, event)
-})
+store.RegisterOrdered(
+    "order.event",
+    func(ev GoEventBus.Event) string {
+        return ev.Data.(OrderEvent).OrderID
+    },
+    func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        return applyOrderEvent(ctx, ev.Data.(OrderEvent))
+    },
+)
 ```
 
-The queue is independent for every handler and key, so ordered handlers retain
-the usual fan-out behaviour. Middleware and lifecycle hooks apply normally.
-In synchronous mode handlers are already serial, so the ordering-key function
-is not evaluated.
+For a given ordering key, async delivery preserves FIFO order.
+
+Different keys remain concurrent.
 
 ---
 
-## Batch Handlers
+# Batch Handlers
 
-`RegisterBatch` collects all events for a projection that accumulate between `Publish` calls and delivers them to the handler as a slice — one call per chunk of up to `size` events. This eliminates per-event overhead for bulk operations like database inserts or HTTP batch APIs.
-
-```go
-store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
-
-store.RegisterBatch("metrics.recorded", 50, func(ctx context.Context, evs []GoEventBus.Event) ([]GoEventBus.Result, error) {
-    rows := make([]MetricRow, len(evs))
-    for i, ev := range evs {
-        rows[i] = ev.Data.(MetricRow)
-    }
-    return nil, db.BulkInsert(ctx, rows)
-})
-```
-
-### Chunking
-
-If more events arrive than the configured `size`, the handler is called multiple times — once per full chunk, then once for the remainder.
+Batch handlers collect pending events for a projection during a `Publish` cycle and deliver them in chunks.
 
 ```go
-// 7 events, size=3 → called with [3 events], [3 events], [1 event]
-store.RegisterBatch("tick", 3, handler)
+store.RegisterBatch(
+    "metrics.recorded",
+    100,
+    func(
+        ctx context.Context,
+        events []GoEventBus.Event,
+    ) ([]GoEventBus.Result, error) {
+        return nil, writeMetricsBatch(ctx, events)
+    },
+)
 ```
 
-### Per-event results
+Regular and batch handlers may coexist on the same projection.
 
-Return a `[]Result` aligned with the input slice to pass per-event results to `OnAfter` hooks. A nil or shorter slice is fine — missing positions are treated as zero `Result` values.
+Multiple batch handlers may also be registered for one projection; each receives the full chunk independently.
 
-```go
-store.RegisterBatch("order.placed", 100, func(ctx context.Context, evs []GoEventBus.Event) ([]GoEventBus.Result, error) {
-    results := make([]GoEventBus.Result, len(evs))
-    for i, ev := range evs {
-        results[i] = GoEventBus.Result{Message: "processed"}
-    }
-    return results, nil
-})
-```
-
-### Fan-out with batch handlers
-
-Multiple batch handlers can be registered for the same projection. Each receives the full chunk independently.
-
-```go
-store.RegisterBatch("order.placed", 50, writeToDatabase)
-store.RegisterBatch("order.placed", 50, pushToAnalytics)
-```
-
-Regular per-event handlers and batch handlers can coexist on the same projection. Both fire on each `Publish` call.
-
-```go
-disp.Register("order.placed", auditLogger)       // called once per event
-store.RegisterBatch("order.placed", 50, bulkWriter) // called once per chunk
-```
-
-### Error handling and the DLQ
-
-A batch handler returns a single error for the whole chunk. On error, every event in the failing chunk is sent to the DLQ and `OnError` fires once per event. Chunks that succeeded in the same `Publish` cycle are unaffected.
-
-```go
-store.DLQ = GoEventBus.NewDeadLetterQueue()
-
-store.RegisterBatch("write", 25, func(ctx context.Context, evs []GoEventBus.Event) ([]GoEventBus.Result, error) {
-    if err := db.BulkInsert(ctx, evs); err != nil {
-        return nil, err // all 25 events land in the DLQ
-    }
-    return nil, nil
-})
-```
-
-### Panics
-
-Panics in a batch handler are recovered and treated identically to a returned error — the chunk lands in the DLQ, `OnError` fires, and the worker pool continues running.
-
-### Lifecycle hooks
-
-`OnBefore`, `OnAfter`, and `OnError` fire **once per event** even for batch handlers, keeping observability consistent regardless of handler type. Middleware is not applied to batch handlers (the signatures are incompatible); use hooks for cross-cutting concerns instead.
-
-### Async mode
-
-Batch handlers participate in the async worker pool when `store.Async = true`. Each chunk is dispatched as one work item.
-
-```go
-store.Async = true
-
-store.RegisterBatch("events", 100, bulkWriter)
-
-for i := 0; i < 300; i++ {
-    _ = store.Subscribe(ctx, GoEventBus.Event{Projection: "events", Data: rows[i]})
-}
-
-store.Publish()
-_ = store.Drain(context.Background()) // wait for all chunks to complete
-```
+Middleware is not applied to batch handlers. Lifecycle hooks are.
 
 ---
 
-## Middleware
+# Middleware
 
-Middleware wraps the handler chain and is applied in the order it is registered. Use it for logging, tracing, timeout injection, or retries.
+Middleware wraps regular handlers.
 
 ```go
-// Logging middleware
 store.Use(func(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
-    return func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-        log.Printf("handling %v", ev.Projection)
-        res, err := next(ctx, ev)
-        log.Printf("done %v err=%v", ev.Projection, err)
-        return res, err
-    }
-})
-
-// Timeout middleware
-store.Use(func(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
-    return func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-        ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-        defer cancel()
-        return next(ctx, ev)
+    return func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        started := time.Now()
+        result, err := next(ctx, ev)
+        log.Printf(
+            "projection=%v duration=%s err=%v",
+            ev.Projection,
+            time.Since(started),
+            err,
+        )
+        return result, err
     }
 })
 ```
 
-Each handler in a fan-out gets its own independent copy of the middleware chain.
+Middleware is applied independently to every handler in a fan-out.
 
 ---
 
-## Lifecycle Hooks
+# Lifecycle Hooks
 
-Hooks fire outside the middleware chain and are useful for metrics, structured logging, and alerting without polluting handler code. For batch handlers, hooks fire once per event in the chunk rather than once per chunk.
+Use hooks for observability without changing handler logic.
 
 ```go
 store.OnBefore(func(ctx context.Context, ev GoEventBus.Event) {
-    // fires before each handler invocation
+    metrics.Inc("handler.started")
 })
 
-store.OnAfter(func(ctx context.Context, ev GoEventBus.Event, res GoEventBus.Result, err error) {
-    // fires after each handler invocation, whether it succeeded or failed
+store.OnAfter(func(
+    ctx context.Context,
+    ev GoEventBus.Event,
+    result GoEventBus.Result,
+    err error,
+) {
+    metrics.Inc("handler.finished")
 })
 
-store.OnError(func(ctx context.Context, ev GoEventBus.Event, err error) {
-    // fires only when a handler returns a non-nil error
-    log.Printf("handler error for %v: %v", ev.Projection, err)
+store.OnError(func(
+    ctx context.Context,
+    ev GoEventBus.Event,
+    err error,
+) {
+    log.Printf("event=%s err=%v", ev.ID, err)
 })
 ```
 
+For batch handlers, hooks are emitted per event.
+
 ---
 
-## Back-pressure Policies
+# Back-pressure
 
 Choose how `Subscribe` behaves when the ring buffer is full.
 
-| Policy | Behaviour | Best for |
-|---|---|---|
-| `DropOldest` | Discards the oldest event to make room | Low-latency pipelines where fresh data matters more than completeness |
-| `Block` | Blocks the caller (respecting its context) until space is available | Workloads that cannot afford to lose events |
-| `ReturnError` | Returns `ErrBufferFull` immediately | Callers that manage their own retry or back-pressure logic |
+| Policy | Behavior |
+|---|---|
+| `DropOldest` | Evict the oldest queued event and accept the new one |
+| `Block` | Wait for capacity while respecting the caller context |
+| `ReturnError` | Return `ErrBufferFull` immediately |
+
+Example:
 
 ```go
-store := GoEventBus.NewEventStore(&disp, 1<<14, GoEventBus.Block)
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1<<14,
+    GoEventBus.Block,
+)
 
-ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+ctx, cancel := context.WithTimeout(
+    context.Background(),
+    50*time.Millisecond,
+)
 defer cancel()
 
-if err := store.Subscribe(ctx, ev); errors.Is(err, context.DeadlineExceeded) {
-    // buffer stayed full for 50 ms — handle accordingly
+if err := store.Subscribe(ctx, event); err != nil {
+    log.Println("enqueue failed:", err)
 }
 ```
 
 ---
 
-## Async Mode
+# Async Mode
 
-Set `store.Async = true` before the first `Publish` call. GoEventBus starts a worker pool sized to `runtime.NumCPU()` and routes every handler invocation through it.
+Enable worker-pool dispatch with:
 
 ```go
-store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
 store.Async = true
+```
 
-store.Publish() // dispatches handlers to the worker pool
+The store uses a fixed worker pool sized to `runtime.NumCPU()`.
 
-// Wait for all in-flight handlers before shutting down.
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+`Publish()` submits regular, ordered, and batch work to that pool.
+
+Call `Drain` or `Close` when shutting down:
+
+```go
+ctx, cancel := context.WithTimeout(
+    context.Background(),
+    5*time.Second,
+)
 defer cancel()
 
 if err := store.Drain(ctx); err != nil {
-    log.Printf("drain timeout: %v", err)
+    log.Println("drain failed:", err)
 }
 ```
 
-`Drain` (or equivalently `Close`) must be called once when the store is no longer needed so worker goroutines are cleaned up.
+Once shutdown begins, new subscriptions return `ErrEventStoreClosed`.
 
 ---
 
-## External Providers
+# External Providers
 
-The in-memory `EventStore` remains the local dispatcher. Providers let a
-process publish events to a broker or feed received broker events into that
-dispatcher:
-
-```go
-// Publish to a broker.
-err := provider.Publish(ctx, GoEventBus.Event{
-    ID:         "evt-42",
-    Projection: "order.created",
-    Data:       OrderCreated{OrderID: "ord-42"},
-})
-
-// Consume broker events into the local store. This blocks until ctx is cancelled.
-err = store.Consume(ctx, provider)
-```
-
-Remote providers use `JSONCodec` by default and therefore require a string
-`Projection`. `Data` is decoded as `map[string]any` by default. Supply a
-`JSONCodec{DecodePayload: ...}` in the provider configuration when handlers
-need a concrete payload type.
-
-### Redis Streams
-
-`RedisProvider` uses Redis Streams and a consumer group. Inject the Redis
-client so your application retains control of TLS, authentication, pooling,
-and its lifecycle.
-
-```go
-rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-provider, err := GoEventBus.NewRedisProvider(GoEventBus.RedisProviderConfig{
-    Client:   rdb,
-    Stream:   "events",
-    Group:    "billing",
-    Consumer: "billing-1",
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer provider.Close() // does not close rdb; it may be shared
-
-go func() {
-    if err := store.Consume(ctx, provider); err != nil && !errors.Is(err, context.Canceled) {
-        log.Printf("Redis consumer stopped: %v", err)
-    }
-}()
-```
-
-The provider acknowledges a stream entry after its consumer callback returns
-success. For `store.Consume`, that means the local store accepted the event;
-handler failures then use the local DLQ/error hooks rather than causing broker
-redelivery.
-
-### RabbitMQ
-
-`RabbitMQProvider` declares a durable topic exchange. Setting `Queue` also
-declares a durable queue and binds it using `BindingKey`; omit `Queue` for a
-publish-only provider. Publication waits for a RabbitMQ publisher confirm.
-
-```go
-provider, err := GoEventBus.NewRabbitMQProvider(GoEventBus.RabbitMQProviderConfig{
-    URL:        "amqp://guest:guest@localhost:5672/",
-    Exchange:   "events",
-    Queue:      "billing",
-    BindingKey: "order.*",
-    Consumer:   "billing-1",
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer provider.Close()
-
-if err := provider.Publish(ctx, GoEventBus.Event{
-    ID:         "evt-42",
-    Projection: "order.created", // RabbitMQ topic routing key
-    Data:       OrderCreated{OrderID: "ord-42"},
-}); err != nil {
-    log.Fatal(err)
-}
-```
-
-When calling a provider's `Consume` directly, return an error from the
-callback to leave the Redis message pending or requeue the RabbitMQ delivery.
-
----
-
-## Dead Letter Queue
-
-Attach a `DeadLetterQueue` to an `EventStore` and every event whose handler returns an error **or panics** is captured there instead of being silently swallowed into the error counter. Panics are wrapped as errors with full `errors.Is` / `errors.As` support when the original panic value was itself an `error`.
-
-```go
-store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
-store.DLQ = GoEventBus.NewDeadLetterQueue()
-```
-
-### Inspecting failures
-
-```go
-store.Publish()
-
-for _, dl := range store.DLQ.Entries() {
-    fmt.Printf("event=%s err=%v attempts=%d failed=%s\n",
-        dl.Event.ID, dl.Err, dl.Attempts, dl.FailedAt.Format(time.RFC3339))
-}
-```
-
-`Entries()` returns a snapshot copy — mutations to the slice do not affect the queue.
-
-### Draining
-
-```go
-failed := store.DLQ.Drain() // empties the queue and returns all entries
-```
-
-### Replaying
-
-`Replay` re-subscribes all entries and calls `Publish` once after. Each entry has its `Attempts` counter incremented. Entries that fail to re-enqueue (e.g. buffer full) are kept in the queue and the first `Subscribe` error is returned.
-
-```go
-if err := store.DLQ.Replay(ctx, store); err != nil {
-    log.Printf("replay partially failed: %v", err)
-}
-```
-
-A common pattern is to gate replays on `Attempts` to avoid infinite retry loops:
-
-```go
-const maxAttempts = 3
-
-for _, dl := range store.DLQ.Drain() {
-    if dl.Attempts >= maxAttempts {
-        log.Printf("dropping %s after %d attempts: %v", dl.Event.ID, dl.Attempts, dl.Err)
-        continue
-    }
-    _ = store.Subscribe(ctx, dl.Event)
-}
-store.Publish()
-```
-
-### Fan-out and the DLQ
-
-Each handler in a fan-out is independent. If handler A fails and handler B succeeds, only A's invocation produces a dead letter — B is unaffected. The same rule applies to batch handlers: only the failing chunk's events land in the DLQ.
-
-```go
-disp.Register("order.placed",
-    auditLogger,     // fails -> one dead letter per event
-    invoiceHandler,  // succeeds -> no dead letters
-)
-```
-
-### Panic recovery
-
-The DLQ also catches handler panics. In sync and async modes alike, the panic is converted to an error, routed to the DLQ and error hooks, and execution continues. The worker pool is never killed by a misbehaving handler.
-
-```go
-disp.Register("risky", func(ctx context.Context, ev GoEventBus.Event) (GoEventBus.Result, error) {
-    panic("something went wrong") // caught — not fatal
-})
-
-store.DLQ = GoEventBus.NewDeadLetterQueue()
-store.Publish()
-
-dl := store.DLQ.Entries()[0]
-fmt.Println(dl.Err) // "handler panic: something went wrong"
-```
-
----
-
-## Transactions
-
-Transactions are local event buffers, not atomic transactions. `Commit` delivers the buffered events synchronously and stops at the first handler error. `Rollback` discards the local buffer, but cannot undo side effects from handlers that already ran before a failed commit.
-
-```go
-type OrderPayload struct{ OrderID string }
-type InvoicePayload struct{ OrderID string }
-
-disp := GoEventBus.Dispatcher{}
-disp.Register("order.created", handleOrder)
-disp.Register("invoice.issued", handleInvoice)
-
-store := GoEventBus.NewEventStore(&disp, 1<<16, GoEventBus.DropOldest)
-
-tx := store.BeginTransaction()
-
-tx.Publish(GoEventBus.Event{
-    ID:         "ev-1",
-    Projection: "order.created",
-    Data:       OrderPayload{OrderID: "ord-99"},
-})
-tx.Publish(GoEventBus.Event{
-    ID:         "ev-2",
-    Projection: "invoice.issued",
-    Data:       InvoicePayload{OrderID: "ord-99"},
-})
-
-if err := tx.Commit(context.Background()); err != nil {
-    tx.Rollback()
-    log.Fatal("transaction failed:", err)
-}
-```
-
----
-
-## Scheduling
-
-Fire an event at a specific point in time or after a duration. The returned `*time.Timer` can be stopped to cancel the event before it fires.
-
-```go
-// Fire at an absolute time.
-timer := store.Schedule(ctx, time.Now().Add(10*time.Second), ev)
-if timer != nil {
-    timer.Stop() // cancel before it fires
-}
-
-// Fire after a duration.
-timer = store.ScheduleAfter(ctx, 30*time.Second, ev)
-```
-
-If the target time is in the past, or the duration is zero or negative, the event is executed synchronously and immediately without entering the ring buffer, and `nil` is returned.
-
----
-
-## API Reference
-
-### `Dispatcher`
-
-```go
-type Dispatcher map[interface{}][]HandlerFunc
-
-func (d Dispatcher) Register(projection interface{}, handlers ...HandlerFunc)
-```
-
-`Register` appends one or more handlers for the given projection. Calling it multiple times on the same key accumulates handlers in call order.
-
-### `Event`
-
-```go
-type Event struct {
-    ID         string
-    Projection interface{}    // key used to look up handlers
-    Data       any            // type-safe payload (preferred)
-    Args       map[string]any // legacy payload (deprecated)
-}
-```
-
-### `HandlerFunc` / `Middleware`
-
-```go
-type HandlerFunc func(context.Context, Event) (Result, error)
-type Middleware  func(HandlerFunc) HandlerFunc
-```
-
-### `BatchHandlerFunc`
-
-```go
-type BatchHandlerFunc func(context.Context, []Event) ([]Result, error)
-```
-
-Receives a slice of events collected during a `Publish` cycle. Returns one `Result` per input event (may be nil or shorter — missing entries default to zero `Result`) and a single error covering the whole batch. Middleware is not applied; use lifecycle hooks for cross-cutting concerns.
-
-### `Result`
-
-```go
-type Result struct {
-    Message string
-}
-```
-
-### `OverrunPolicy`
-
-```go
-const (
-    DropOldest  OverrunPolicy = iota
-    Block
-    ReturnError
-)
-
-var ErrBufferFull = errors.New("goeventbus: buffer is full")
-```
-
-### `EventStore`
-
-#### Constructor
-
-```go
-func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy) *EventStore
-```
-
-Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
-
-**Fields**
-
-| Field | Type | Description |
-|---|---|---|
-| `Async` | `bool` | Enable async worker pool dispatch |
-| `DLQ` | `*DeadLetterQueue` | Optional dead letter queue; `nil` by default |
-
-#### Methods
-
-| Method | Description |
-|---|---|
-| `Subscribe(ctx, Event) error` | Enqueue an event; applies back-pressure per `OverrunPolicy` |
-| `DecideAndSubscribe(ctx, EventSelector, state, Event, []EventCandidate) (EventDecision, error)` | Select an event type, assign its projection, and enqueue the event |
-| `Publish()` | Dispatch all pending events to their handlers |
-| `RegisterOrdered(projection, OrderingKeyFunc, handlers...)` | Register handlers that preserve FIFO delivery for each key in async mode |
-| `RegisterBatch(projection, size, BatchHandlerFunc)` | Register a batch handler; events are delivered in chunks of up to `size` |
-| `Consume(ctx, Provider) error` | Receive broker events and enqueue them in the local store |
-| `Use(Middleware)` | Append middleware to the chain (applied to per-event handlers only) |
-| `OnBefore(BeforeHook)` | Register a hook that runs before each handler invocation |
-| `OnAfter(AfterHook)` | Register a hook that runs after each handler invocation |
-| `OnError(ErrorHook)` | Register a hook that runs when a handler errors |
-| `Drain(ctx) error` | Wait for all async handlers; shuts down the worker pool |
-| `Close(ctx) error` | Alias for `Drain` |
-| `Metrics() (published, processed, errors uint64)` | Snapshot event counters; `processed` counts individual events, not batch calls |
-| `Schedule(ctx, time.Time, Event) *time.Timer` | Fire an event at a time |
-| `ScheduleAfter(ctx, time.Duration, Event) *time.Timer` | Fire an event after a duration |
-| `BeginTransaction() *Transaction` | Returns a `*Transaction` scoped to this store |
-
-### Decision routing
-
-```go
-type EventSelector interface {
-    SelectEvent(context.Context, any, []EventCandidate) (EventDecision, error)
-}
-
-type DecisionCache interface {
-    Get(context.Context, string) (EventDecision, bool, error)
-    Set(context.Context, string, EventDecision) error
-}
-```
-
-`JevSelector` implements `EventSelector` with OpenRouter Jev. `RuleCacheSelector`
-composes deterministic `EventRule` entries, a `DecisionCache`, and any
-fallback `EventSelector`. `NewMemoryDecisionCache(ttl)` provides the built-in
-goroutine-safe TTL cache.
-
-### `Provider`
+The local `EventStore` remains the execution engine. Providers move events between processes.
 
 ```go
 type Provider interface {
@@ -800,51 +547,245 @@ type Provider interface {
 }
 ```
 
-`RedisProvider` is created with `NewRedisProvider(RedisProviderConfig)` and
-uses Redis Streams consumer groups. `RabbitMQProvider` is created with
-`NewRabbitMQProvider(RabbitMQProviderConfig)` and uses durable RabbitMQ topic
-exchange/queue topology. Both use `JSONCodec` unless a custom `EventCodec` is
-provided.
+Built-in providers:
 
-### `DeadLetter`
+- **Redis Streams**
+- **RabbitMQ**
+
+Remote providers require a **string projection** because the projection becomes a stable broker routing name.
+
+## Redis Streams
 
 ```go
-type DeadLetter struct {
-    Event    Event
-    Err      error     // handler error, or a wrapped panic value
-    FailedAt time.Time
-    Attempts int       // 1 on first failure; incremented on each Replay call
+rdb := redis.NewClient(&redis.Options{
+    Addr: "localhost:6379",
+})
+
+provider, err := GoEventBus.NewRedisProvider(
+    GoEventBus.RedisProviderConfig{
+        Client:   rdb,
+        Stream:   "events",
+        Group:    "billing",
+        Consumer: "billing-1",
+    },
+)
+if err != nil {
+    log.Fatal(err)
 }
+defer provider.Close()
+
+go func() {
+    if err := store.Consume(ctx, provider); err != nil &&
+        !errors.Is(err, context.Canceled) {
+        log.Println(err)
+    }
+}()
 ```
 
-### `DeadLetterQueue`
+## RabbitMQ
 
 ```go
-func NewDeadLetterQueue() *DeadLetterQueue
+provider, err := GoEventBus.NewRabbitMQProvider(
+    GoEventBus.RabbitMQProviderConfig{
+        URL:        "amqp://guest:guest@localhost:5672/",
+        Exchange:   "events",
+        Queue:      "billing",
+        BindingKey: "order.*",
+        Consumer:   "billing-1",
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer provider.Close()
 ```
 
-| Method | Description |
-|---|---|
-| `Len() int` | Number of entries currently in the queue |
-| `Entries() []DeadLetter` | Snapshot copy — safe to iterate without holding a lock |
-| `Drain() []DeadLetter` | Remove and return all entries, leaving the queue empty |
-| `Replay(ctx, store) error` | Re-subscribe all entries, call `Publish`, keep failures in queue |
-
-Attach to a store via `store.DLQ = GoEventBus.NewDeadLetterQueue()`. When `DLQ` is `nil` (default) behaviour is unchanged.
-
-### `Transaction`
-
-| Method | Description |
-|---|---|
-| `Publish(Event)` | Buffer an event within the transaction |
-| `Commit(ctx) error` | Deliver buffered events synchronously; stop on the first handler error |
-| `Rollback()` | Discard the local buffer; does not undo completed handler side effects |
+Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when consumers need concrete payload types rather than generic JSON values.
 
 ---
 
-## Benchmarks
+# Dead Letter Queue
 
-Run on Apple M-series with `go test -bench . -benchtime=3s`:
+Attach a DLQ to retain handler failures and recovered panics.
+
+```go
+store.DLQ = GoEventBus.NewDeadLetterQueue()
+```
+
+Inspect failures:
+
+```go
+for _, dead := range store.DLQ.Entries() {
+    log.Printf(
+        "event=%s attempts=%d err=%v",
+        dead.Event.ID,
+        dead.Attempts,
+        dead.Err,
+    )
+}
+```
+
+Replay:
+
+```go
+if err := store.DLQ.Replay(ctx, store); err != nil {
+    log.Println("replay failed:", err)
+}
+```
+
+Handler panics are recovered and converted into errors so a single handler cannot kill the worker pool.
+
+---
+
+# Transactions
+
+Transactions are local event buffers, not database-style atomic transactions.
+
+```go
+tx := store.BeginTransaction()
+
+tx.Publish(GoEventBus.Event{
+    ID:         "evt-1",
+    Projection: "order.created",
+    Data:       order,
+})
+
+tx.Publish(GoEventBus.Event{
+    ID:         "evt-2",
+    Projection: "invoice.created",
+    Data:       invoice,
+})
+
+if err := tx.Commit(ctx); err != nil {
+    tx.Rollback()
+    log.Fatal(err)
+}
+```
+
+`Commit` executes buffered regular handlers synchronously and stops at the first error.
+
+`Rollback` only discards events still buffered locally. It cannot undo side effects from handlers that already ran.
+
+---
+
+# Scheduling
+
+Schedule an event at a time:
+
+```go
+timer := store.Schedule(
+    ctx,
+    time.Now().Add(10*time.Second),
+    event,
+)
+```
+
+Or after a duration:
+
+```go
+timer := store.ScheduleAfter(
+    ctx,
+    30*time.Second,
+    event,
+)
+```
+
+The returned `*time.Timer` may be stopped before it fires.
+
+Past times and non-positive durations are handled immediately.
+
+---
+
+# Metrics
+
+```go
+published, processed, failures := store.Metrics()
+
+fmt.Printf(
+    "published=%d processed=%d errors=%d\n",
+    published,
+    processed,
+    failures,
+)
+```
+
+These counters cover event execution. Decision-layer metrics such as cache hit rate or Jev latency are intentionally not baked into the core API yet.
+
+---
+
+# API Snapshot
+
+## Event routing
+
+```go
+type EventCandidate struct {
+    Key         string
+    Projection  interface{}
+    Description string
+}
+
+type EventDecision struct {
+    Choice        string
+    Projection    interface{}
+    Confidence    float64
+    Probabilities map[string]float64
+    Model         string
+    RequestID     string
+}
+
+type EventSelector interface {
+    SelectEvent(
+        context.Context,
+        any,
+        []EventCandidate,
+    ) (EventDecision, error)
+}
+```
+
+Main implementations:
+
+- `JevSelector`
+- `RuleCacheSelector`
+- `MemoryDecisionCache`
+
+## EventStore
+
+```go
+func NewEventStore(
+    dispatcher *Dispatcher,
+    bufferSize uint64,
+    policy OverrunPolicy,
+) *EventStore
+```
+
+`bufferSize` must be a non-zero power of two.
+
+Important methods:
+
+| Method | Purpose |
+|---|---|
+| `Subscribe` | Enqueue a known event |
+| `DecideAndSubscribe` | Select a candidate event type and enqueue it |
+| `Publish` | Dispatch pending events |
+| `RegisterOrdered` | Preserve FIFO per ordering key |
+| `RegisterBatch` | Process projection events in chunks |
+| `Consume` | Feed provider events into the local store |
+| `Use` | Register middleware |
+| `OnBefore` / `OnAfter` / `OnError` | Register lifecycle hooks |
+| `Metrics` | Read event counters |
+| `Schedule` / `ScheduleAfter` | Schedule future events |
+| `BeginTransaction` | Start a local transaction buffer |
+| `Drain` / `Close` | Stop accepting events and finish in-flight work |
+
+---
+
+# Benchmarks
+
+Repository benchmarks on Apple M-series:
+
+```bash
+go test -bench . -benchtime=3s
+```
 
 | Benchmark | Iterations | ns/op |
 |---|---:|---:|
@@ -860,12 +801,59 @@ Run on Apple M-series with `go test -bench . -benchtime=3s`:
 | `BenchmarkFastHTTPAsync` | 1,954,884 | 662.0 |
 | `BenchmarkFastHTTPParallel` | 4,489,274 | 262.3 |
 
+The intelligent routing path is intentionally outside these core dispatch benchmarks because rules, cache, and Jev have very different latency profiles.
+
 ---
 
-## Contributing
+# Design Principles
 
-Contributions, issues, and feature requests are welcome. See the [issues page](https://github.com/Protocol-Lattice/GoEventBus/issues) to get started.
+GoEventBus keeps decision-making and execution separate.
 
-## License
+```text
+Decision layer                    Execution layer
 
-Distributed under the MIT License. See `LICENSE` for details.
+rules ─┐
+       ├─► choice ───────────────► EventStore
+cache ─┤                           ├─ ring buffer
+       │                           ├─ back-pressure
+Jev ───┘                           ├─ worker pool
+                                   ├─ ordering
+                                   ├─ batching
+                                   ├─ middleware/hooks
+                                   └─ DLQ
+```
+
+This separation means:
+
+- the event bus does not depend on Jev,
+- deterministic workloads do not pay model latency,
+- model failures do not change core dispatch semantics,
+- alternative selectors can implement the same `EventSelector` interface,
+- alternative caches can implement `DecisionCache`,
+- application code can mix direct and intelligent routing in the same store.
+
+---
+
+# Contributing
+
+Issues and pull requests are welcome.
+
+Run the test suite with:
+
+```bash
+go test -race ./...
+```
+
+Integration tests:
+
+```bash
+go test -race -tags=integration -timeout=5m ./...
+```
+
+Quality checks used by CI include `go vet` and `staticcheck`.
+
+---
+
+# License
+
+Distributed under the MIT License. See `LICENSE`.
