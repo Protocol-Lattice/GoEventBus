@@ -303,6 +303,36 @@ when cache failures should fail the routing call instead.
 
 ---
 
+# Examples
+
+The repository includes runnable examples for both the classic event-bus path and the intelligent routing layer.
+
+| Example | What it demonstrates |
+|---|---|
+| [`routing_rules`](examples/routing_rules) | Deterministic first-match routing with `EventRule`; no model or cache required |
+| [`routing_cache`](examples/routing_cache) | Reusing a previous decision so the fallback selector is called only once |
+| [`routing_jev`](examples/routing_jev) | Full `rules → cache → Jev → GoEventBus` routing with OpenRouter |
+| [`hello_world`](examples/hello_world) | Minimal direct `Subscribe → Publish` flow |
+| [`middleware`](examples/middleware) | Handler middleware and lifecycle behavior |
+| [`goroutines-subscribe-publisher`](examples/goroutines-subscribe-publisher) | Concurrent producers and publishing |
+| [`drop_oldest`](examples/drop_oldest) | `DropOldest` back-pressure |
+| [`return_error`](examples/return_error) | `ReturnError` back-pressure |
+| [`handler_timeout`](examples/handler_timeout) | Handler context timeout |
+| [`publisher_timeout`](examples/publisher_timeout) | Blocking publisher timeout |
+| [`fasthttp`](examples/fasthttp) | HTTP integration |
+
+Run the new routing examples directly:
+
+```bash
+go run ./examples/routing_rules
+go run ./examples/routing_cache
+OPENROUTER_API_KEY=... go run ./examples/routing_jev
+```
+
+See [`examples/README.md`](examples/README.md) for a compact guide to all examples.
+
+---
+
 # Core Event Model
 
 ```go
