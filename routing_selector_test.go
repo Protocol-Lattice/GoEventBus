@@ -46,7 +46,8 @@ func TestRuleCacheSelector_RuleWinsBeforeFallback(t *testing.T) {
 	}
 	if decision.Choice != "order_cancelled" {
 		t.Fatalf("choice = %q, want order_cancelled", decision.Choice)
-	}	if decision.Confidence != 1 {
+	}
+	if decision.Confidence != 1 {
 		t.Fatalf("confidence = %v, want 1", decision.Confidence)
 	}
 	if fallbackCalls.Load() != 0 {
@@ -85,6 +86,10 @@ func TestRuleCacheSelector_CacheAvoidsRepeatedFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first SelectEvent: %v", err)
 	}
+	if first.Choice != "house_sold" {
+		t.Fatalf("first choice = %q, want house_sold", first.Choice)
+	}
+
 	second, err := selector.SelectEvent(
 		context.Background(),
 		state,
@@ -95,7 +100,8 @@ func TestRuleCacheSelector_CacheAvoidsRepeatedFallback(t *testing.T) {
 	}
 	if second.Choice != "house_sold" {
 		t.Fatalf("second choice = %q, want house_sold", second.Choice)
-	}	if fallbackCalls.Load() != 1 {
+	}
+	if fallbackCalls.Load() != 1 {
 		t.Fatalf("fallback calls = %d, want 1", fallbackCalls.Load())
 	}
 }
