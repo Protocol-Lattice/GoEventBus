@@ -13,6 +13,7 @@ A high-performance event bus for Go: an in-memory, lock-free core with Redis Str
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Jev Event Routing](#jev-event-routing)
 - [Fan-out](#fan-out)
 - [Ordered Handlers](#ordered-handlers)
 - [Batch Handlers](#batch-handlers)
@@ -45,6 +46,7 @@ A high-performance event bus for Go: an in-memory, lock-free core with Redis Str
 - **Dead letter queue** — failed and panicking events are routed to an inspectable, replayable secondary store instead of being silently counted
 - **Transactions** — buffer events locally, then synchronously commit or discard them
 - **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
+- **Jev event routing** — optionally use TypeSafe Jev to choose one event type from a fixed candidate set before enqueueing
 - **Metrics** — published, processed, and error counters via a single call
 
 ---
@@ -124,6 +126,54 @@ func main() {
 - `Projection` can be any comparable value — a string, a struct, an integer.
 - `Data` carries the type-safe payload; assert it inside the handler.
 - Pass the context your handler should respect to `Subscribe`; it is forwarded to every handler.
+
+---
+
+## Jev Event Routing
+
+GoEventBus can use [TypeSafe Jev](https://openrouter.ai/typesafe/jev-1.13) as an optional decision layer before enqueueing an event. Jev chooses one event type from a fixed candidate set; GoEventBus still owns buffering, middleware, ordering, fan-out, and handler execution.
+
+The integration calls OpenRouter's Decisions API directly with the standard library, so it adds no Go module dependency.
+
+```go
+selector := &GoEventBus.JevSelector{
+    APIKey: os.Getenv("OPENROUTER_API_KEY"),
+}
+
+decision, err := store.DecideAndSubscribe(
+    context.Background(),
+    selector,
+    map[string]any{
+        "message": "The property at 1 Main St was sold for $500000",
+    },
+    GoEventBus.Event{
+        ID:   "evt3",
+        Data: HouseSoldPayload{Address: "1 Main St", Price: 500_000},
+    },
+    []GoEventBus.EventCandidate{
+        {
+            Key:         "user_created",
+            Projection:  "user_created",
+            Description: "A new user account was created",
+        },
+        {
+            Key:         "house_sold",
+            Projection:  HouseWasSold{},
+            Description: "A property sale was completed",
+        },
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("selected=%s confidence=%.2f\n", decision.Choice, decision.Confidence)
+store.Publish()
+```
+
+`EventCandidate.Key` is the stable string Jev sees, while `Projection` remains the real dispatcher key. This means decision routing works with both string projections and typed struct projections.
+
+The default model is `typesafe/jev-1.13`. Override `JevSelector.Model`, `Endpoint`, `Instructions`, or `Client` when needed. The existing explicit `Subscribe` API is unchanged, so applications can keep deterministic routing for events that do not need model-based selection.
 
 ---
 
