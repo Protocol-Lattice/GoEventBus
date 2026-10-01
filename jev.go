@@ -148,6 +148,9 @@ func (s *JevSelector) SelectEvent(
 	state any,
 	candidates []EventCandidate,
 ) (EventDecision, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(s.APIKey) == "" {
 		return EventDecision{}, errors.New("goeventbus: Jev API key is empty")
 	}
