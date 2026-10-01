@@ -21,16 +21,6 @@ var (
 	ErrDecisionCache = errors.New("goeventbus: decision cache failure")
 )
 
-// DecisionSource identifies which routing layer produced an EventDecision.
-type DecisionSource string
-
-const (
-	DecisionSourceRule     DecisionSource = "rule"
-	DecisionSourceCache    DecisionSource = "cache"
-	DecisionSourceJev      DecisionSource = "jev"
-	DecisionSourceSelector DecisionSource = "selector"
-)
-
 // EventRuleMatch decides whether a deterministic rule applies to the current
 // state and candidate set.
 type EventRuleMatch func(context.Context, any, []EventCandidate) bool
@@ -123,7 +113,6 @@ func (s *RuleCacheSelector) SelectEvent(
 			Choice:        choice,
 			Confidence:    1,
 			Probabilities: map[string]float64{choice: 1},
-			Source:        DecisionSourceRule,
 		}, nil
 	}
 
@@ -148,7 +137,6 @@ func (s *RuleCacheSelector) SelectEvent(
 				}
 			} else if ok {
 				if _, valid := validChoices[cached.Choice]; valid {
-					cached.Source = DecisionSourceCache
 					return cached, nil
 				}
 			}
@@ -166,10 +154,6 @@ func (s *RuleCacheSelector) SelectEvent(
 	if _, ok := validChoices[decision.Choice]; !ok {
 		return EventDecision{}, fmt.Errorf("%w: %q", ErrUnknownEventChoice, decision.Choice)
 	}
-	if decision.Source == "" {
-		decision.Source = DecisionSourceSelector
-	}
-
 	if s.Cache != nil && cacheKey != "" {
 		if err := s.Cache.Set(ctx, cacheKey, decision); err != nil && s.StrictCache {
 			return EventDecision{}, fmt.Errorf("%w: set: %v", ErrDecisionCache, err)
