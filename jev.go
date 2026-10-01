@@ -44,7 +44,6 @@ type EventDecision struct {
 	Probabilities map[string]float64
 	Model         string
 	RequestID     string
-	Source        DecisionSource
 }
 
 // EventSelector chooses one candidate event type from a fixed set.
@@ -261,6 +260,5 @@ func (s *JevSelector) SelectEvent(
 		Probabilities: answer.Probabilities,
 		Model:         decoded.Model,
 		RequestID:     decoded.ID,
-		Source:        DecisionSourceJev,
 	}, nil
 }
