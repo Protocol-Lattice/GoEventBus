@@ -113,28 +113,28 @@ func TestEventStore_DecideAndSubscribeRejectsUnknownChoice(t *testing.T) {
 func TestJevSelector_SelectEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
+			t.Errorf("method = %s, want POST", r.Method)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-			t.Fatalf("authorization = %q", got)
+			t.Errorf("authorization = %q", got)
 		}
 
 		var request jevDecisionRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode request: %v", err)
+			t.Errorf("decode request: %v", err)
 		}
 		if request.Model != defaultJevModel {
-			t.Fatalf("model = %q, want %q", request.Model, defaultJevModel)
+			t.Errorf("model = %q, want %q", request.Model, defaultJevModel)
 		}
 		question, ok := request.Questions["event_type"]
 		if !ok {
-			t.Fatal("missing event_type question")
+			t.Error("missing event_type question")
 		}
 		if question.Type != "choice" {
-			t.Fatalf("question type = %q, want choice", question.Type)
+			t.Errorf("question type = %q, want choice", question.Type)
 		}
 		if question.Criteria["order_created"] != "A new order should be created" {
-			t.Fatalf("unexpected criteria: %#v", question.Criteria)
+			t.Errorf("unexpected criteria: %#v", question.Criteria)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
