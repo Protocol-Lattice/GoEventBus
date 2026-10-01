@@ -756,6 +756,7 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | Method | Description |
 |---|---|
 | `Subscribe(ctx, Event) error` | Enqueue an event; applies back-pressure per `OverrunPolicy` |
+| `DecideAndSubscribe(ctx, EventSelector, state, Event, []EventCandidate) (EventDecision, error)` | Select an event type, assign its projection, and enqueue the event |
 | `Publish()` | Dispatch all pending events to their handlers |
 | `RegisterOrdered(projection, OrderingKeyFunc, handlers...)` | Register handlers that preserve FIFO delivery for each key in async mode |
 | `RegisterBatch(projection, size, BatchHandlerFunc)` | Register a batch handler; events are delivered in chunks of up to `size` |
@@ -770,6 +771,24 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | `Schedule(ctx, time.Time, Event) *time.Timer` | Fire an event at a time |
 | `ScheduleAfter(ctx, time.Duration, Event) *time.Timer` | Fire an event after a duration |
 | `BeginTransaction() *Transaction` | Returns a `*Transaction` scoped to this store |
+
+### Decision routing
+
+```go
+type EventSelector interface {
+    SelectEvent(context.Context, any, []EventCandidate) (EventDecision, error)
+}
+
+type DecisionCache interface {
+    Get(context.Context, string) (EventDecision, bool, error)
+    Set(context.Context, string, EventDecision) error
+}
+```
+
+`JevSelector` implements `EventSelector` with OpenRouter Jev. `RuleCacheSelector`
+composes deterministic `EventRule` entries, a `DecisionCache`, and any
+fallback `EventSelector`. `NewMemoryDecisionCache(ttl)` provides the built-in
+goroutine-safe TTL cache.
 
 ### `Provider`
 
