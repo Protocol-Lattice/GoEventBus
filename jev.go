@@ -72,7 +72,8 @@ func (es *EventStore) DecideAndSubscribe(
 	}
 
 	byKey := make(map[string]EventCandidate, len(candidates))
-	for _, candidate := range candidates {
+	normalized := make([]EventCandidate, len(candidates))
+	for i, candidate := range candidates {
 		key := strings.TrimSpace(candidate.Key)
 		if key == "" {
 			return EventDecision{}, fmt.Errorf("%w: empty key", ErrInvalidEventCandidate)
@@ -81,10 +82,11 @@ func (es *EventStore) DecideAndSubscribe(
 			return EventDecision{}, fmt.Errorf("%w: duplicate key %q", ErrInvalidEventCandidate, key)
 		}
 		candidate.Key = key
+		normalized[i] = candidate
 		byKey[key] = candidate
 	}
 
-	decision, err := selector.SelectEvent(ctx, state, candidates)
+	decision, err := selector.SelectEvent(ctx, state, normalized)
 	if err != nil {
 		return EventDecision{}, err
 	}
@@ -150,6 +152,9 @@ func (s *JevSelector) SelectEvent(
 ) (EventDecision, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if s == nil {
+		return EventDecision{}, ErrNilEventSelector
 	}
 	if strings.TrimSpace(s.APIKey) == "" {
 		return EventDecision{}, errors.New("goeventbus: Jev API key is empty")
