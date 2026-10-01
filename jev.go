@@ -61,6 +61,9 @@ func (es *EventStore) DecideAndSubscribe(
 	event Event,
 	candidates []EventCandidate,
 ) (EventDecision, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if selector == nil {
 		return EventDecision{}, ErrNilEventSelector
 	}
