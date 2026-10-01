@@ -46,7 +46,7 @@ A high-performance event bus for Go: an in-memory, lock-free core with Redis Str
 - **Dead letter queue** — failed and panicking events are routed to an inspectable, replayable secondary store instead of being silently counted
 - **Transactions** — buffer events locally, then synchronously commit or discard them
 - **Scheduling** — fire events at a future `time.Time` or after a `time.Duration`
-- **Jev event routing** — optionally use TypeSafe Jev to choose one event type from a fixed candidate set before enqueueing
+- **Rules + cached Jev routing** — deterministic rules first, TTL decision cache second, Jev fallback only for unresolved event types
 - **Metrics** — published, processed, and error counters via a single call
 
 ---
@@ -131,21 +131,42 @@ func main() {
 
 ## Jev Event Routing
 
-GoEventBus can use [TypeSafe Jev](https://openrouter.ai/typesafe/jev-1.13) as an optional decision layer before enqueueing an event. Jev chooses one event type from a fixed candidate set; GoEventBus still owns buffering, middleware, ordering, fan-out, and handler execution.
+GoEventBus can use [TypeSafe Jev](https://openrouter.ai/typesafe/jev-1.13) as an optional decision layer before enqueueing an event. For production routing, wrap Jev with `RuleCacheSelector`:
 
-The integration calls OpenRouter's Decisions API directly with the standard library, so it adds no Go module dependency.
+```text
+rules -> cache -> Jev -> cache write -> Subscribe -> Publish -> handler
+```
+
+Rules are evaluated first and the first match wins. If no rule matches, the selector checks a TTL cache. Jev is only called on a cache miss.
 
 ```go
-selector := &GoEventBus.JevSelector{
+jev := &GoEventBus.JevSelector{
     APIKey: os.Getenv("OPENROUTER_API_KEY"),
+}
+
+selector := &GoEventBus.RuleCacheSelector{
+    Rules: []GoEventBus.EventRule{
+        {
+            Name:   "explicit-cancel",
+            Choice: "order_cancelled",
+            Match: func(_ context.Context, state any, _ []GoEventBus.EventCandidate) bool {
+                input, ok := state.(map[string]any)
+                return ok && input["action"] == "cancel"
+            },
+        },
+    },
+    Cache:    GoEventBus.NewMemoryDecisionCache(5 * time.Minute),
+    Fallback: jev,
+}
+
+state := map[string]any{
+    "message": "The property at 1 Main St was sold for $500000",
 }
 
 decision, err := store.DecideAndSubscribe(
     context.Background(),
     selector,
-    map[string]any{
-        "message": "The property at 1 Main St was sold for $500000",
-    },
+    state,
     GoEventBus.Event{
         ID:   "evt3",
         Data: HouseSoldPayload{Address: "1 Main St", Price: 500_000},
@@ -161,6 +182,11 @@ decision, err := store.DecideAndSubscribe(
             Projection:  HouseWasSold{},
             Description: "A property sale was completed",
         },
+        {
+            Key:         "order_cancelled",
+            Projection:  "order_cancelled",
+            Description: "An existing order should be cancelled",
+        },
     },
 )
 if err != nil {
@@ -171,9 +197,15 @@ fmt.Printf("selected=%s confidence=%.2f\n", decision.Choice, decision.Confidence
 store.Publish()
 ```
 
-`EventCandidate.Key` is the stable string Jev sees, while `Projection` remains the real dispatcher key. This means decision routing works with both string projections and typed struct projections.
+`EventCandidate.Key` is the stable string exposed to the decision layer, while `Projection` remains the real dispatcher key. This keeps routing compatible with both string projections and typed struct projections.
 
-The default model is `typesafe/jev-1.13`. Override `JevSelector.Model`, `Endpoint`, `Instructions`, or `Client` when needed. The existing explicit `Subscribe` API is unchanged, so applications can keep deterministic routing for events that do not need model-based selection.
+`MemoryDecisionCache` is goroutine-safe and lazily expires entries. A TTL of zero or less disables expiration. The default cache key hashes the JSON-serializable state plus candidate keys and descriptions; candidate order does not affect the key. For application-specific semantics, set `RuleCacheSelector.CacheKey`.
+
+`DecisionCache` is an interface, so a Redis or distributed cache can be plugged in without changing the router. Cache failures are fail-open by default because cache is an optimization; set `StrictCache: true` when cache failures should fail the routing call.
+
+The Jev integration calls OpenRouter's Decisions API directly with the standard library, so it adds no Go module dependency. The default model is `typesafe/jev-1.13`. Override `JevSelector.Model`, `Endpoint`, `Instructions`, or `Client` when needed.
+
+The existing explicit `Subscribe` API is unchanged, so deterministic application code can bypass model-based routing entirely.
 
 ---
 
@@ -724,6 +756,7 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | Method | Description |
 |---|---|
 | `Subscribe(ctx, Event) error` | Enqueue an event; applies back-pressure per `OverrunPolicy` |
+| `DecideAndSubscribe(ctx, EventSelector, state, Event, []EventCandidate) (EventDecision, error)` | Select an event type, assign its projection, and enqueue the event |
 | `Publish()` | Dispatch all pending events to their handlers |
 | `RegisterOrdered(projection, OrderingKeyFunc, handlers...)` | Register handlers that preserve FIFO delivery for each key in async mode |
 | `RegisterBatch(projection, size, BatchHandlerFunc)` | Register a batch handler; events are delivered in chunks of up to `size` |
@@ -738,6 +771,24 @@ Panics if `dispatcher` is nil or `bufferSize` is not a non-zero power of two.
 | `Schedule(ctx, time.Time, Event) *time.Timer` | Fire an event at a time |
 | `ScheduleAfter(ctx, time.Duration, Event) *time.Timer` | Fire an event after a duration |
 | `BeginTransaction() *Transaction` | Returns a `*Transaction` scoped to this store |
+
+### Decision routing
+
+```go
+type EventSelector interface {
+    SelectEvent(context.Context, any, []EventCandidate) (EventDecision, error)
+}
+
+type DecisionCache interface {
+    Get(context.Context, string) (EventDecision, bool, error)
+    Set(context.Context, string, EventDecision) error
+}
+```
+
+`JevSelector` implements `EventSelector` with OpenRouter Jev. `RuleCacheSelector`
+composes deterministic `EventRule` entries, a `DecisionCache`, and any
+fallback `EventSelector`. `NewMemoryDecisionCache(ttl)` provides the built-in
+goroutine-safe TTL cache.
 
 ### `Provider`
 
