@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="GoEventBus is a high-performance Go event bus with deterministic rules, cached decisions, and optional Jev-powered routing. Explore the pipeline and start building.">
+  <meta name="theme-color" content="#eeeeeb">
+  <title>GoEventBus — Fast events. Intelligent decisions.</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23181818'/%3E%3Cpath d='M8 7h8v6h8v12h-8v-6H8z' fill='none' stroke='%23f3a7c7' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a>
+    <nav aria-label="Main navigation"><a href="#routing">How it works</a><a href="#capabilities">Capabilities</a><a href="#quickstart">Quick start</a>    </nav>
+    <a class="nav-github" href="https://github.com/Protocol-Lattice/GoEventBus" target="_blank" rel="noopener noreferrer">GitHub <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .8a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.4 3.5 1 .1-.7.4-1.2.8-1.5-2.6-.3-5.4-1.3-5.4-5.6 0-1.2.4-2.2 1.2-3-.1-.3-.5-1.5.1-3 0 0 1-.3 3.1 1.2a10.7 10.7 0 0 1 5.7 0C17 5 18 5.3 18 5.3c.6 1.5.2 2.7.1 3 .8.8 1.2 1.8 1.2 3 0 4.3-2.8 5.3-5.4 5.6.4.4.8 1.1.8 2.2v3.1c0 .4.2.7.8.6A11.3 11.3 0 0 0 12 .8z"/></svg></a>
+  </header>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-registration mono"><span>GO NATIVE.</span><span>OPEN SOURCE. MIT LICENSE.</span></div>
+      <div class="eyebrow"><span class="pixel-mark" aria-hidden="true">✳</span> An event bus with a decision layer</div>
+      <h1 id="hero-title">Fast events.<br><span>Intelligent decisions.</span></h1>
+      <p class="hero-description">Route with rules. Remember with cache.<br>Let Jev handle the ambiguous.<br class="mobile-break"> Keep execution in Go.</p>
+      <div class="hero-actions"><a class="button button-dark" href="#quickstart">Start building <span aria-hidden="true">⌘</span></a><a class="button button-light" href="https://github.com/Protocol-Lattice/GoEventBus#readme" target="_blank" rel="noopener noreferrer">Read the docs <span aria-hidden="true">▤</span></a></div>
+      <div class="hero-footnote mono"><span>01 / DECIDE</span><span class="small-line"></span><span>02 / DISPATCH</span></div>
+    </section>
+
+    <section class="routing-section" id="routing" aria-labelledby="routing-title">
+      <div class="section-kicker mono"><span id="routing-title">THE ROUTING ENGINE</span><span>ONE PIPELINE. THREE WAYS THROUGH.</span></div>
+      <div class="routing-window">
+        <div class="window-title mono"><span><span class="window-icon" aria-hidden="true">▧</span> goeventbus / routing.pipeline</span><span class="window-controls" aria-hidden="true">— &nbsp; □ &nbsp; ×</span></div>
+        <div class="routing-toolbar"><span class="mono">EXPLORE A PATH</span><div class="scenario-tabs" role="group" aria-label="Routing scenario"><button type="button" data-scenario="rules" aria-pressed="false">01 Rules match</button><button type="button" data-scenario="cache" aria-pressed="false">02 Cache hit</button><button type="button" data-scenario="jev" aria-pressed="true">03 Jev fallback</button></div></div>
+        <div class="pipeline" data-active="jev">
+          <div class="input-block"><span class="node-label mono">INCOMING STATE</span><div class="input-card"><span class="mono">event.json</span><p id="event-input">“The property at 1 Main St<br>was sold for $500,000.”</p><span class="input-tag mono">unstructured input</span></div></div>
+          <span class="connector" aria-hidden="true"></span>
+          <div class="pipeline-node" id="node-rules"><span class="node-label mono">01 / DETERMINISTIC</span><div class="node-body"><span class="node-symbol" aria-hidden="true">{ }</span><h3>Rules</h3><span class="node-status mono" id="rules-status">no match</span></div></div>
+          <span class="connector" aria-hidden="true"></span>
+          <div class="pipeline-node" id="node-cache"><span class="node-label mono">02 / REMEMBERED</span><div class="node-body"><span class="node-symbol" aria-hidden="true">▤</span><h3>Cache</h3><span class="node-status mono" id="cache-status">cache miss</span></div></div>
+          <span class="connector" aria-hidden="true"></span>
+          <div class="pipeline-node selected" id="node-jev"><span class="node-label mono">03 / INTELLIGENT</span><div class="node-body"><span class="node-symbol jev-symbol" aria-hidden="true">✳</span><h3>Jev</h3><span class="node-status mono" id="jev-status">decision selected</span></div></div>
+          <span class="connector last" aria-hidden="true"></span>
+          <div class="output-block"><span class="node-label mono">GOEVENTBUS</span><div class="output-card"><span class="mono">EventStore</span><div class="buffer-cells" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="output-tag mono">ring buffer → handlers</span></div></div>
+        </div>
+        <div class="pipeline-result"><div><span class="mono result-label">SELECTED EVENT</span><code id="selected-event">property.sold</code></div><div class="result-explanation" id="result-explanation" role="status" aria-live="polite">No matching rule. No cached decision. Jev selects from your candidates.</div><span class="demo-label mono">ILLUSTRATIVE DEMO</span></div>
+      </div>
+      <div class="routing-caption"><p>Your rules run first. Your cache comes next.<br><strong>Only the unresolved reaches the model.</strong></p><span class="mono">DECISION LAYER ≠ EXECUTION LAYER</span></div>
+    </section>
+
+    <div class="stack-strip"><span class="mono">SMALL CORE. CONNECTED SYSTEMS.</span><div><span class="stack-name go-word">Go <small>1.23+</small></span><span class="stack-name">Redis <small>Streams</small></span><span class="stack-name">RabbitMQ</span><span class="stack-name jev-word">✳ Jev <small>optional</small></span></div></div>
+
+    <section class="principle-section" aria-labelledby="principle-title">
+      <div class="section-kicker mono"><span>01 / THE PRINCIPLE</span><span>SEPARATE THE CHOICE FROM THE WORK</span></div>
+      <div class="principle-grid">
+        <div><h2 id="principle-title">Inference stays<br>out of the<br><span>hot path.</span></h2><p>Choose the event before you enqueue it. Then let a bounded MPMC ring buffer and Go handlers do what they do best.</p><p>Already know the event type? Call <code>Subscribe</code> directly. The decision layer is entirely optional.</p><a class="text-link" href="https://github.com/Protocol-Lattice/GoEventBus#design-principles" target="_blank" rel="noopener noreferrer">Explore the architecture</a></div>
+        <div class="execution-window">
+          <div class="execution-heading mono"><span>execution.engine</span><span aria-hidden="true">[ GO ]</span></div>
+          <div class="execution-body"><div class="execution-entry"><span class="mono">SELECTED EVENT</span><code>store.Subscribe(ctx, event)</code></div><div class="vertical-wire" aria-hidden="true"></div><div class="ring-label mono"><span>BOUNDED MPMC RING</span><span>FIFO</span></div><div class="execution-ring" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="vertical-wire" aria-hidden="true"></div><div class="publish-call"><code>store.Publish()</code><span class="mono">dispatch pending events</span></div><div class="fanout-lines" aria-hidden="true"><i></i><i></i><i></i></div><div class="handler-grid"><div><span aria-hidden="true">{ }</span><span>Fan-out</span></div><div><span aria-hidden="true">≡</span><span>Ordered</span></div><div><span aria-hidden="true">▤</span><span>Batch</span></div></div><div class="execution-bottom mono">YOUR HANDLERS. YOUR EXECUTION.</div></div>
+        </div>
+      </div>
+      <div class="principle-foot mono"><span>DETERMINISM WHERE YOU WANT IT.</span><span>INTELLIGENCE WHERE YOU NEED IT.</span></div>
+    </section>
+
+    <section class="capabilities-section content-section" id="capabilities" aria-labelledby="capabilities-title">
+      <div class="section-kicker mono"><span>02 / BUILT INTO THE BUS</span><span>FROM ONE HANDLER TO MANY</span></div>
+      <div class="section-intro"><h2 id="capabilities-title">The plumbing,<br>already in place.</h2><p>From local events to concurrent pipelines.<br>The execution layer stays under your control.</p></div>
+      <div class="feature-grid">
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">⋔</span><span class="mono">[ 01 ]</span></div><h3>One event. Many handlers.</h3><p>Fan out to independent handlers. One handler’s error doesn’t keep the others from doing their work.</p><code>dispatcher.Register(...)</code></article>
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">≡</span><span class="mono">[ 02 ]</span></div><h3>Order where it matters.</h3><p>Preserve FIFO delivery per ordering key in async mode, while unrelated entities run concurrently.</p><code>store.RegisterOrdered(...)</code></article>
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">▦</span><span class="mono">[ 03 ]</span></div><h3>Work in batches.</h3><p>Collect pending events into chunks during a publish cycle. A natural fit for bulk writes and metrics.</p><code>store.RegisterBatch(...)</code></article>
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">⊣</span><span class="mono">[ 04 ]</span></div><h3>Pressure, with a policy.</h3><p>Choose what happens when the buffer fills: drop the oldest event, wait for capacity, or return an error.</p><code>DropOldest · Block · ReturnError</code></article>
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">⌁</span><span class="mono">[ 05 ]</span></div><h3>Observe. Recover. Replay.</h3><p>Add middleware and lifecycle hooks. Capture handler failures and recovered panics in a replayable dead-letter queue.</p><code>store.DLQ.Replay(ctx, store)</code></article>
+        <article class="feature"><div class="feature-top"><span class="feature-glyph" aria-hidden="true">⊞</span><span class="mono">[ 06 ]</span></div><h3>Beyond one process.</h3><p>Bring events in with Redis Streams or RabbitMQ providers. Keep the local EventStore as your execution engine.</p><code>store.Consume(ctx, provider)</code></article>
+      </div>
+    </section>
+
+    <section class="quickstart-section content-section" id="quickstart" aria-labelledby="quickstart-title">
+      <div class="section-kicker mono"><span>03 / LESS SETUP. MORE GO.</span><span>GO 1.23+</span></div>
+      <div class="quickstart-grid">
+        <div class="quickstart-copy"><h2 id="quickstart-title">Start simple.<br>Add intelligence.</h2><p>Register a handler. Enqueue an event. Publish.<br>Bring in Jev when your input needs a decision.</p><label class="mono install-label" for="install-command">INSTALL THE PACKAGE</label><div class="install-command"><code id="install-command">go get github.com/Protocol-Lattice/GoEventBus</code><button type="button" id="copy-install" aria-label="Copy installation command" title="Copy installation command"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12"/><path d="M15 8V4H4v11h4"/></svg></button></div><span class="copy-status mono" id="install-status" role="status" aria-live="polite"></span><div class="quickstart-notes"><div><span class="note-number mono">01</span><p><strong>Make it yours.</strong><br>Use string or typed projections for local dispatch.</p></div><div><span class="note-number mono">02</span><p><strong>Keep the choice bounded.</strong><br>Define the candidates. Jev selects between them.</p></div><div><span class="note-number mono">03</span><p><strong>Bring your own control.</strong><br>Plug in your selectors and cache implementations.</p></div></div><a class="text-link" href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples" target="_blank" rel="noopener noreferrer">Browse all runnable examples</a></div>
+        <div class="code-window"><div class="code-tabs" role="tablist" aria-label="Go example"><button type="button" id="tab-direct" role="tab" aria-selected="true" aria-controls="code-panel" data-example="direct">Direct dispatch</button><button type="button" id="tab-intelligent" role="tab" aria-selected="false" tabindex="-1" aria-controls="code-panel" data-example="intelligent">Rules + cache + Jev</button></div><div class="code-toolbar mono"><span id="code-filename">main.go</span><button type="button" id="copy-code">Copy code</button></div><div id="code-panel" role="tabpanel" aria-labelledby="tab-direct" tabindex="0"><pre><code id="example-code">package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    bus "github.com/Protocol-Lattice/GoEventBus"
+)
+
+func main() {
+    ctx := context.Background()
+    dispatcher := bus.Dispatcher{}
+
+    dispatcher.Register("order.created", func(
+        _ context.Context, ev bus.Event,
+    ) (bus.Result, error) {
+        fmt.Println("Received:", ev.Data)
+        return bus.Result{}, nil
+    })
+
+    store := bus.NewEventStore(
+        &amp;dispatcher, 1024, bus.Block,
+    )
+    defer store.Close(ctx)
+
+    if err := store.Subscribe(ctx, bus.Event{
+        ID:         "evt-1",
+        Projection: "order.created",
+        Data:       "Hello, GoEventBus",
+    }); err != nil {
+        log.Fatal(err)
+    }
+
+    store.Publish()
+}</code></pre></div><div class="code-footer mono"><span>GO / <span id="code-description">SYNCHRONOUS DISPATCH</span></span><span id="code-status" role="status" aria-live="polite">READY TO RUN</span></div></div>
+      </div>
+    </section>
+
+    <section class="faq-section content-section" aria-labelledby="faq-title"><div class="faq-heading"><span class="section-kicker mono">04 / GOOD QUESTIONS</span><h2 id="faq-title">A few things<br>worth knowing.</h2><span class="faq-asterisk" aria-hidden="true">✳</span></div><div class="faq-list">
+      <details open><summary>Do I need Jev to use GoEventBus?<span aria-hidden="true">+</span></summary><p>No. Use <code>Subscribe</code> and <code>Publish</code> for a conventional event bus. You can add deterministic rules, a decision cache, or a Jev fallback whenever your workload needs them.</p></details>
+      <details><summary>When does the model actually get called?<span aria-hidden="true">+</span></summary><p>With <code>RuleCacheSelector</code>, rules are evaluated first. If none match, the cache is checked. The fallback selector runs only when neither resolves the decision. Successful fallback decisions can then be cached.</p></details>
+      <details><summary>How does the Jev integration work?<span aria-hidden="true">+</span></summary><p><code>JevSelector</code> calls the OpenRouter Decisions API using the Go standard library. Set <code>OPENROUTER_API_KEY</code> in your server environment and supply a bounded list of event candidates. It returns the selected choice, confidence, and probabilities. <a href="https://github.com/Protocol-Lattice/GoEventBus#4-use-jev-as-the-fallback" target="_blank" rel="noopener noreferrer">Read the integration guide</a>.</p></details>
+      <details><summary>Can I check confidence before dispatch?<span aria-hidden="true">+</span></summary><p>Yes. Call <code>SelectEvent</code>, check the returned decision, and then enqueue it with <code>Subscribe</code>. The convenience method <code>DecideAndSubscribe</code> selects and enqueues immediately; it doesn’t apply a confidence threshold for you.</p></details>
+      <details><summary>Can events travel between services?<span aria-hidden="true">+</span></summary><p>Yes. Redis Streams and RabbitMQ providers move events between processes, while the local EventStore runs your handlers. Remote providers need string projections for stable broker routing names.</p></details>
+    </div></section>
+
+    <section class="closing-section"><div class="mono closing-label"><span>YOUR NEXT EVENT STARTS HERE.</span><span>[ GO ]</span></div><div class="closing-content"><h2>Good things<br>happen in Go.</h2><div><p>Keep the fast path fast.<br>Give the uncertain a way forward.</p><a class="button button-dark" href="https://github.com/Protocol-Lattice/GoEventBus" target="_blank" rel="noopener noreferrer">Build with GoEventBus <span aria-hidden="true">{ }</span></a></div></div><div class="closing-line" aria-hidden="true"><span></span><i></i><i></i><i></i><i></i><i></i><span></span></div></section>
+  </main>
+  <footer class="site-footer"><a class="brand" href="#" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a><p class="mono">BY PROTOCOL LATTICE · OPEN SOURCE</p><div><a href="https://github.com/Protocol-Lattice/GoEventBus#readme" target="_blank" rel="noopener noreferrer">Read the docs</a><a href="https://github.com/Protocol-Lattice/GoEventBus/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a><a href="https://typesafe.ai" target="_blank" rel="noopener noreferrer">Meet Jev</a></div></footer>
+  <script src="app.js" defer></script>
+</body>
+</html>

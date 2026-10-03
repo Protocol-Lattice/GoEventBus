@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://github.com/Protocol-Lattice/GoEventBus/blob/main/logo2025.png?raw=true" alt="GoEventBus">
-</p>
-
 # GoEventBus
 
 **A high-performance event bus for Go with deterministic rules, cached decisions, and optional Jev-powered event routing.**
