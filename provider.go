@@ -93,9 +93,6 @@ func (es *EventStore) providerForUse() (Provider, error) {
 	es.providerMu.Lock()
 	defer es.providerMu.Unlock()
 
-	if es.closed.Load() {
-		return nil, ErrEventStoreClosed
-	}
 	if es.provider != nil {
 		return es.provider, nil
 	}
@@ -112,6 +109,15 @@ func (es *EventStore) providerForUse() (Provider, error) {
 	}
 	es.provider = provider
 	return provider, nil
+}
+
+func (es *EventStore) configuredProviderForConsume() (Provider, error) {
+	es.lifecycleMu.Lock()
+	defer es.lifecycleMu.Unlock()
+	if es.closed.Load() {
+		return nil, ErrEventStoreClosed
+	}
+	return es.providerForUse()
 }
 
 func (es *EventStore) closeConfiguredProvider() error {
@@ -254,10 +260,7 @@ func (es *EventStore) Consume(ctx context.Context, providers ...Provider) error 
 	var provider Provider
 	switch len(providers) {
 	case 0:
-		if es.closed.Load() {
-			return ErrEventStoreClosed
-		}
-		configured, err := es.providerForUse()
+		configured, err := es.configuredProviderForConsume()
 		if err != nil {
 			return err
 		}
