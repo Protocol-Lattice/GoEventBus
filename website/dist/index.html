@@ -13,7 +13,7 @@
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <a class="brand" href="#" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a>
-    <nav aria-label="Main navigation"><a href="#routing">How it works</a><a href="#capabilities">Capabilities</a><a href="#benchmarks">Benchmarks</a><a href="#quickstart">Quick start</a></nav>
+    <nav aria-label="Main navigation"><a href="#routing">How it works</a><a href="#capabilities">Capabilities</a><a href="#benchmarks">Benchmarks</a><a href="#quickstart">Quick start</a><a class="nav-docs" href="docs/">Documentation</a></nav>
     <a class="nav-github" href="https://github.com/Protocol-Lattice/GoEventBus" target="_blank" rel="noopener noreferrer">GitHub <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .8a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.4 3.5 1 .1-.7.4-1.2.8-1.5-2.6-.3-5.4-1.3-5.4-5.6 0-1.2.4-2.2 1.2-3-.1-.3-.5-1.5.1-3 0 0 1-.3 3.1 1.2a10.7 10.7 0 0 1 5.7 0C17 5 18 5.3 18 5.3c.6 1.5.2 2.7.1 3 .8.8 1.2 1.8 1.2 3 0 4.3-2.8 5.3-5.4 5.6.4.4.8 1.1.8 2.2v3.1c0 .4.2.7.8.6A11.3 11.3 0 0 0 12 .8z"/></svg></a>
   </header>
   <main id="main">
@@ -22,7 +22,7 @@
       <div class="eyebrow"><span class="pixel-mark" aria-hidden="true">✳</span> An event bus with a decision layer</div>
       <h1 id="hero-title">Fast events.<br><span>Intelligent decisions.</span></h1>
       <p class="hero-description">Route with rules. Remember with cache.<br>Let Jev handle the ambiguous.<br class="mobile-break"> Keep execution in Go.</p>
-      <div class="hero-actions"><a class="button button-dark" href="#quickstart">Start building <span aria-hidden="true">⌘</span></a><a class="button button-light" href="https://github.com/Protocol-Lattice/GoEventBus#readme" target="_blank" rel="noopener noreferrer">Read the docs <span aria-hidden="true">▤</span></a></div>
+      <div class="hero-actions"><a class="button button-dark" href="#quickstart">Start building <span aria-hidden="true">⌘</span></a><a class="button button-light" href="docs/">Read the docs <span aria-hidden="true">▤</span></a></div>
       <div class="hero-footnote mono"><span>01 / DECIDE</span><span class="small-line"></span><span>02 / DISPATCH</span></div>
     </section>
 
@@ -56,7 +56,7 @@
           <h2 id="principle-title">Inference stays<br>out of the<br><span>hot path.</span></h2>
           <p>Choose the event before you enqueue it. Then let a bounded MPMC ring buffer and Go handlers do what they do best.</p>
           <p class="principle-note">The decision layer is optional. Execution stays in Go.</p>
-          <a class="text-link" href="https://github.com/Protocol-Lattice/GoEventBus#design-principles" target="_blank" rel="noopener noreferrer">Explore the architecture</a>
+          <a class="text-link" href="docs/#design-principles">Explore the architecture</a>
         </div>
         <div class="principle-diagram" role="group" aria-label="Optional Jev decision layer feeds a selected event into the Go execution engine">
           <div class="decision-layer">
@@ -221,14 +221,14 @@ func main() {
     <section class="faq-section content-section" aria-labelledby="faq-title"><div class="faq-heading"><span class="section-kicker mono">05 / GOOD QUESTIONS</span><h2 id="faq-title">A few things<br>worth knowing.</h2><span class="faq-asterisk" aria-hidden="true">✳</span></div><div class="faq-list">
       <details open><summary>Do I need Jev to use GoEventBus?<span aria-hidden="true">+</span></summary><p>No. Use <code>Subscribe</code> and <code>Publish</code> for a conventional event bus. You can add deterministic rules, a decision cache, or a Jev fallback whenever your workload needs them.</p></details>
       <details><summary>When does the model actually get called?<span aria-hidden="true">+</span></summary><p>With <code>RuleCacheSelector</code>, rules are evaluated first. If none match, the cache is checked. The fallback selector runs only when neither resolves the decision. Successful fallback decisions can then be cached.</p></details>
-      <details><summary>How does the Jev integration work?<span aria-hidden="true">+</span></summary><p><code>JevSelector</code> calls the OpenRouter Decisions API using the Go standard library. Set <code>OPENROUTER_API_KEY</code> in your server environment and supply a bounded list of event candidates. It returns the selected choice, confidence, and probabilities. <a href="https://github.com/Protocol-Lattice/GoEventBus#4-use-jev-as-the-fallback" target="_blank" rel="noopener noreferrer">Read the integration guide</a>.</p></details>
+      <details><summary>How does the Jev integration work?<span aria-hidden="true">+</span></summary><p><code>JevSelector</code> calls the OpenRouter Decisions API using the Go standard library. Set <code>OPENROUTER_API_KEY</code> in your server environment and supply a bounded list of event candidates. It returns the selected choice, confidence, and probabilities. <a href="docs/#4-use-jev-as-the-fallback">Read the integration guide</a>.</p></details>
       <details><summary>Can I check confidence before dispatch?<span aria-hidden="true">+</span></summary><p>Yes. Call <code>SelectEvent</code>, check the returned decision, and then enqueue it with <code>Subscribe</code>. The convenience method <code>DecideAndSubscribe</code> selects and enqueues immediately; it doesn’t apply a confidence threshold for you.</p></details>
       <details><summary>Can events travel between services?<span aria-hidden="true">+</span></summary><p>Yes. Redis Streams and RabbitMQ providers move events between processes, while the local EventStore runs your handlers. Remote providers need string projections for stable broker routing names.</p></details>
     </div></section>
 
     <section class="closing-section"><div class="mono closing-label"><span>YOUR NEXT EVENT STARTS HERE.</span><span>[ GO ]</span></div><div class="closing-content"><h2>Good things<br>happen in Go.</h2><div><p>Keep the fast path fast.<br>Give the uncertain a way forward.</p><a class="button button-dark" href="https://github.com/Protocol-Lattice/GoEventBus" target="_blank" rel="noopener noreferrer">Build with GoEventBus <span aria-hidden="true">{ }</span></a></div></div><div class="closing-line" aria-hidden="true"><span></span><i></i><i></i><i></i><i></i><i></i><span></span></div></section>
   </main>
-  <footer class="site-footer"><a class="brand" href="#" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a><p class="mono">BY PROTOCOL LATTICE · OPEN SOURCE</p><div><a href="https://github.com/Protocol-Lattice/GoEventBus#readme" target="_blank" rel="noopener noreferrer">Read the docs</a><a href="https://github.com/Protocol-Lattice/GoEventBus/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a><a href="https://typesafe.ai" target="_blank" rel="noopener noreferrer">Meet Jev</a></div></footer>
+  <footer class="site-footer"><a class="brand" href="#" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a><p class="mono">BY PROTOCOL LATTICE · OPEN SOURCE</p><div><a href="docs/">Read the docs</a><a href="https://github.com/Protocol-Lattice/GoEventBus/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a><a href="https://typesafe.ai" target="_blank" rel="noopener noreferrer">Meet Jev</a></div></footer>
   <script src="app.js" defer></script>
 </body>
 </html>

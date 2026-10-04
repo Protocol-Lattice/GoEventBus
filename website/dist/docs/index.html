@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en" class="docs-root">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="GoEventBus documentation: installation, Go examples, handlers, rules, cache, Jev routing, Redis Streams, RabbitMQ, and API reference. Search every guide and code example.">
+  <meta name="theme-color" content="#f8f8f6">
+  <title>Documentation — GoEventBus</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23181818'/%3E%3Cpath d='M8 7h8v6h8v12h-8v-6H8z' fill='none' stroke='%23f3a7c7' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+  <script src="../docs.js" defer></script>
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main">Skip to documentation</a>
+  <header class="site-header docs-header">
+    <a class="brand" href="../" aria-label="GoEventBus home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7h8v6h8v12h-8v-6H8z"/></svg><span>GoEventBus</span></a>
+    <nav aria-label="Main navigation"><a href="../#routing">How it works</a><a href="../#capabilities">Capabilities</a><a href="../#benchmarks">Benchmarks</a><a href="../#quickstart">Quick start</a><a class="nav-docs" href="./" aria-current="page">Documentation</a></nav>
+    <a class="nav-github" href="https://github.com/Protocol-Lattice/GoEventBus" target="_blank" rel="noopener noreferrer">GitHub <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .8a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.4 3.5 1 .1-.7.4-1.2.8-1.5-2.6-.3-5.4-1.3-5.4-5.6 0-1.2.4-2.2 1.2-3-.1-.3-.5-1.5.1-3 0 0 1-.3 3.1 1.2a10.7 10.7 0 0 1 5.7 0C17 5 18 5.3 18 5.3c.6 1.5.2 2.7.1 3 .8.8 1.2 1.8 1.2 3 0 4.3-2.8 5.3-5.4 5.6.4.4.8 1.1.8 2.2v3.1c0 .4.2.7.8.6A11.3 11.3 0 0 0 12 .8z"/></svg></a>
+  </header>
+  <div class="docs-toolbar">
+    <a class="docs-home-label mono" href="./">GUIDES &amp; REFERENCE</a>
+    <div class="doc-search" role="search" aria-label="Documentation">
+      <div class="doc-search-field">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        <label class="visually-hidden" for="doc-search-input">Search documentation</label>
+        <input id="doc-search-input" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="doc-search-results" aria-describedby="doc-search-hint" placeholder="Search documentation…" autocomplete="off" spellcheck="false" maxlength="160" disabled>
+        <button id="doc-search-clear" type="button" aria-label="Clear search" hidden>×</button>
+        <kbd id="doc-search-shortcut" aria-hidden="true">Ctrl K</kbd>
+      </div>
+      <div id="doc-search-panel" class="doc-search-panel" hidden>
+        <p id="doc-search-status" role="status" aria-live="polite"></p>
+        <div id="doc-search-results" role="listbox" aria-label="Documentation results"></div>
+        <p id="doc-search-empty" hidden>Try a topic like <strong>handlers</strong>, <strong>Redis</strong>, or <strong>cache</strong>.</p>
+        <p class="doc-search-help mono" aria-hidden="true"><span>↑ ↓ navigate · Enter open</span><span>Esc close</span></p>
+      </div>
+      <span class="visually-hidden" id="doc-search-hint">Search guides, API names, and code examples. Use arrow keys to choose a result and Enter to open it.</span>
+    </div>
+  </div>
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation topics">
+      <details id="doc-menu" open>
+        <summary>Browse documentation <span aria-hidden="true">+</span></summary>
+        <nav aria-label="Documentation sections">
+<div class="doc-nav-group"><p class="doc-nav-label">Getting started</p>
+<a href="#overview" aria-current="location">Overview</a>
+<a href="#installation">Installation</a>
+<a href="#quick-start">Quick start</a>
+<a href="#core-event-model">Events &amp; handlers</a>
+<a href="#why-goeventbus">Why GoEventBus?</a>
+<a href="#features">Features</a>
+</div>
+<div class="doc-nav-group"><p class="doc-nav-label">Event handling</p>
+<a href="#fan-out">Fan-out</a>
+<a href="#ordered-handlers">Ordered Handlers</a>
+<a href="#batch-handlers">Batch Handlers</a>
+<a href="#middleware">Middleware</a>
+<a href="#lifecycle-hooks">Lifecycle Hooks</a>
+<a href="#back-pressure">Back-pressure</a>
+<a href="#async-mode">Async &amp; shutdown</a>
+</div>
+<div class="doc-nav-group"><p class="doc-nav-label">Routing &amp; integrations</p>
+<a href="#intelligent-event-routing">Rules, cache &amp; Jev</a>
+<a href="#external-providers">Redis &amp; RabbitMQ</a>
+</div>
+<div class="doc-nav-group"><p class="doc-nav-label">Operations</p>
+<a href="#dead-letter-queue">Dead letter queue</a>
+<a href="#transactions">Transactions</a>
+<a href="#scheduling">Scheduling</a>
+<a href="#metrics">Metrics</a>
+</div>
+<div class="doc-nav-group"><p class="doc-nav-label">Reference</p>
+<a href="#api-snapshot">API reference</a>
+<a href="#examples">Examples</a>
+<a href="#benchmarks">Benchmarks</a>
+<a href="#design-principles">Architecture</a>
+<a href="#contributing">Contributing</a>
+<a href="#license">License</a>
+</div>
+        </nav>
+      </details>
+      <a class="doc-source-link" href="https://github.com/Protocol-Lattice/GoEventBus#readme">View README on GitHub</a>
+    </aside>
+    <main id="main" class="docs-content" tabindex="-1">
+      <noscript><p class="doc-note">All documentation is available below. Enable JavaScript to search, or use your browser’s Find command.</p></noscript>
+<section class="doc-section" id="overview" data-doc-section data-search-section data-title="Overview" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h1 tabindex="-1">Documentation<a class="heading-anchor" href="#overview" aria-label="Link to Documentation">#</a></h1>
+<p class="doc-lead">A high-performance event bus for Go with deterministic rules, cached decisions, and optional Jev-powered event routing.</p>
+<div class="doc-start-links"><a href="#installation"><span class="mono">01 / SET UP</span><strong>Install GoEventBus</strong><span>One package. Go 1.23+.</span></a><a href="#quick-start"><span class="mono">02 / BUILD</span><strong>Run your first event</strong><span>Register, enqueue, dispatch.</span></a></div>
+<p>GoEventBus combines a bounded MPMC in-memory event bus with fan-out, ordered and batch handlers, middleware, lifecycle hooks, dead-letter handling, Redis Streams, RabbitMQ, and an optional decision layer for choosing which event type should execute.</p>
+<aside class="doc-note"><strong>Start with the direct path.</strong><p><code>Subscribe</code> enqueues an event. <code>Publish</code> dispatches pending events to your handlers. The rules, cache, and Jev decision layer is optional.</p></aside>
+<div class="doc-flow" aria-label="Register handlers, enqueue with Subscribe, dispatch with Publish"><span><small>01</small>Register</span><span><small>02</small>Subscribe</span><span><small>03</small>Publish</span></div>
+</section>
+<section class="doc-section" id="installation" data-doc-section data-search-section data-title="Installation" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h2 tabindex="-1">Installation<a class="heading-anchor" href="#installation" aria-label="Link to Installation">#</a></h2>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go get github.com/Protocol-Lattice/GoEventBus</code></pre></div>
+<p>GoEventBus currently targets <strong>Go 1.23+</strong>.</p>
+</section>
+<section class="doc-section" id="quick-start" data-doc-section data-search-section data-title="Quick start" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h2 tabindex="-1">Quick start<a class="heading-anchor" href="#quick-start" aria-label="Link to Quick start">#</a></h2>
+
+<section class="doc-subsection" id="plain-event-bus" data-search-section data-title="Plain event bus" data-category="Quick start"><h3 tabindex="-1">Plain event bus<a class="heading-anchor" href="#plain-event-bus" aria-label="Link to Plain event bus">#</a></h3>
+<p>Use the direct path when the event type is already known.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">package main
+
+import (
+    &quot;context&quot;
+    &quot;fmt&quot;
+    &quot;log&quot;
+
+    GoEventBus &quot;github.com/Protocol-Lattice/GoEventBus&quot;
+)
+
+type UserCreated struct {
+    ID string
+}
+
+func main() {
+    dispatcher := GoEventBus.Dispatcher{}
+
+    dispatcher.Register(&quot;user.created&quot;, func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        payload := ev.Data.(UserCreated)
+        fmt.Println(&quot;user created:&quot;, payload.ID)
+        return GoEventBus.Result{Message: &quot;ok&quot;}, nil
+    })
+
+    store := GoEventBus.NewEventStore(
+        &amp;dispatcher,
+        1&lt;&lt;16,
+        GoEventBus.DropOldest,
+    )
+    store.Async = true
+
+    if err := store.Subscribe(context.Background(), GoEventBus.Event{
+        ID:         &quot;evt-1&quot;,
+        Projection: &quot;user.created&quot;,
+        Data:       UserCreated{ID: &quot;u-42&quot;},
+    }); err != nil {
+        log.Fatal(err)
+    }
+
+    store.Publish()
+
+    if err := store.Drain(context.Background()); err != nil {
+        log.Fatal(err)
+    }
+}</code></pre></div>
+<p><code>Projection</code> may be any comparable value for local dispatch, including a string or a typed struct.</p>
+</section>
+</section>
+<section class="doc-section" id="core-event-model" data-doc-section data-search-section data-title="Events &amp; handlers" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h2 tabindex="-1">Events &amp; handlers<a class="heading-anchor" href="#core-event-model" aria-label="Link to Events &amp; handlers">#</a></h2>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type Event struct {
+    ID         string
+    Projection interface{}
+    Data       any
+    Args       map[string]any // deprecated
+}</code></pre></div>
+<p>Prefer <code>Data</code> for payloads. <code>Args</code> remains for backwards compatibility.</p>
+<p>Handlers use:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type HandlerFunc func(
+    context.Context,
+    Event,
+) (Result, error)</code></pre></div>
+<p>Register handlers with a <code>Dispatcher</code>:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">dispatcher := GoEventBus.Dispatcher{}
+
+dispatcher.Register(
+    &quot;order.created&quot;,
+    handleBilling,
+    handleAnalytics,
+)</code></pre></div>
+<p>Calling <code>Register</code> repeatedly for the same projection appends handlers rather than replacing them.</p>
+</section>
+<section class="doc-section" id="why-goeventbus" data-doc-section data-search-section data-title="Why GoEventBus?" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h2 tabindex="-1">Why GoEventBus?<a class="heading-anchor" href="#why-goeventbus" aria-label="Link to Why GoEventBus?">#</a></h2>
+<p>Most events do not need model inference. Some do.</p>
+<p>GoEventBus keeps those paths separate:</p>
+<ul>
+<li><strong>Known event type</strong> → enqueue it directly.</li>
+<li><strong>Obvious rule</strong> → route deterministically.</li>
+<li><strong>Repeated decision</strong> → reuse the cached choice.</li>
+<li><strong>Ambiguous input</strong> → ask Jev to choose from a bounded candidate set.</li>
+<li><strong>Execution</strong> → always stays inside GoEventBus.</li>
+</ul>
+<p>That gives you intelligent routing without putting an LLM call in the <code>Publish()</code> hot path.</p>
+</section>
+<section class="doc-section" id="features" data-doc-section data-search-section data-title="Features" data-category="Getting started">
+<p class="doc-section-label mono">Getting started</p>
+<h2 tabindex="-1">Features<a class="heading-anchor" href="#features" aria-label="Link to Features">#</a></h2>
+<ul>
+<li><strong>Bounded MPMC ring buffer</strong> built with atomics and cache-line padding.</li>
+<li><strong>Rules → cache → Jev routing</strong> for optional intelligent event selection.</li>
+<li><strong>Typed or string projections</strong> for local dispatch.</li>
+<li><strong>Fan-out handlers</strong> with independent execution.</li>
+<li><strong>Ordered handlers</strong> with FIFO delivery per ordering key.</li>
+<li><strong>Batch handlers</strong> for bulk writes and high-throughput pipelines.</li>
+<li><strong>Sync and async dispatch</strong> with a fixed worker pool.</li>
+<li><strong>Middleware</strong> for per-handler cross-cutting behavior.</li>
+<li><strong>Lifecycle hooks</strong> with <code>OnBefore</code>, <code>OnAfter</code>, and <code>OnError</code>.</li>
+<li><strong>Back-pressure policies</strong>: <code>DropOldest</code>, <code>Block</code>, or <code>ReturnError</code>.</li>
+<li><strong>Dead-letter queue</strong> with replay support and panic recovery.</li>
+<li><strong>Redis Streams and RabbitMQ providers</strong> for cross-process delivery.</li>
+<li><strong>Transactions</strong> with local buffering and synchronous commit.</li>
+<li><strong>Scheduling</strong> with absolute and relative timers.</li>
+<li><strong>Metrics</strong> for published, processed, and failed events.</li>
+<li><strong>Pluggable decision cache</strong> through the <code>DecisionCache</code> interface.</li>
+</ul>
+</section>
+<section class="doc-section" id="fan-out" data-doc-section data-search-section data-title="Fan-out" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Fan-out<a class="heading-anchor" href="#fan-out" aria-label="Link to Fan-out">#</a></h2>
+<p>Multiple handlers may subscribe to the same projection.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">dispatcher.Register(
+    &quot;order.placed&quot;,
+    auditLogger,
+    inventoryReducer,
+    notificationSender,
+)</code></pre></div>
+<p>Each handler is independent. One handler returning an error does not prevent the other fan-out handlers from running.</p>
+<p>In async mode, each regular handler invocation becomes its own worker-pool item.</p>
+</section>
+<section class="doc-section" id="ordered-handlers" data-doc-section data-search-section data-title="Ordered Handlers" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Ordered Handlers<a class="heading-anchor" href="#ordered-handlers" aria-label="Link to Ordered Handlers">#</a></h2>
+<p>Use ordered handlers when events for the same entity must be processed sequentially while unrelated entities can still run concurrently.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type OrderEvent struct {
+    OrderID  string
+    Sequence int
+}
+
+store.RegisterOrdered(
+    &quot;order.event&quot;,
+    func(ev GoEventBus.Event) string {
+        return ev.Data.(OrderEvent).OrderID
+    },
+    func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        return applyOrderEvent(ctx, ev.Data.(OrderEvent))
+    },
+)</code></pre></div>
+<p>For a given ordering key, async delivery preserves FIFO order.</p>
+<p>Different keys remain concurrent.</p>
+</section>
+<section class="doc-section" id="batch-handlers" data-doc-section data-search-section data-title="Batch Handlers" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Batch Handlers<a class="heading-anchor" href="#batch-handlers" aria-label="Link to Batch Handlers">#</a></h2>
+<p>Batch handlers collect pending events for a projection during a <code>Publish</code> cycle and deliver them in chunks.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store.RegisterBatch(
+    &quot;metrics.recorded&quot;,
+    100,
+    func(
+        ctx context.Context,
+        events []GoEventBus.Event,
+    ) ([]GoEventBus.Result, error) {
+        return nil, writeMetricsBatch(ctx, events)
+    },
+)</code></pre></div>
+<p>Regular and batch handlers may coexist on the same projection.</p>
+<p>Multiple batch handlers may also be registered for one projection; each receives the full chunk independently.</p>
+<p>Middleware is not applied to batch handlers. Lifecycle hooks are.</p>
+</section>
+<section class="doc-section" id="middleware" data-doc-section data-search-section data-title="Middleware" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Middleware<a class="heading-anchor" href="#middleware" aria-label="Link to Middleware">#</a></h2>
+<p>Middleware wraps regular handlers.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store.Use(func(next GoEventBus.HandlerFunc) GoEventBus.HandlerFunc {
+    return func(
+        ctx context.Context,
+        ev GoEventBus.Event,
+    ) (GoEventBus.Result, error) {
+        started := time.Now()
+        result, err := next(ctx, ev)
+        log.Printf(
+            &quot;projection=%v duration=%s err=%v&quot;,
+            ev.Projection,
+            time.Since(started),
+            err,
+        )
+        return result, err
+    }
+})</code></pre></div>
+<p>Middleware is applied independently to every handler in a fan-out.</p>
+</section>
+<section class="doc-section" id="lifecycle-hooks" data-doc-section data-search-section data-title="Lifecycle Hooks" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Lifecycle Hooks<a class="heading-anchor" href="#lifecycle-hooks" aria-label="Link to Lifecycle Hooks">#</a></h2>
+<p>Use hooks for observability without changing handler logic.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store.OnBefore(func(ctx context.Context, ev GoEventBus.Event) {
+    metrics.Inc(&quot;handler.started&quot;)
+})
+
+store.OnAfter(func(
+    ctx context.Context,
+    ev GoEventBus.Event,
+    result GoEventBus.Result,
+    err error,
+) {
+    metrics.Inc(&quot;handler.finished&quot;)
+})
+
+store.OnError(func(
+    ctx context.Context,
+    ev GoEventBus.Event,
+    err error,
+) {
+    log.Printf(&quot;event=%s err=%v&quot;, ev.ID, err)
+})</code></pre></div>
+<p>For batch handlers, hooks are emitted per event.</p>
+</section>
+<section class="doc-section" id="back-pressure" data-doc-section data-search-section data-title="Back-pressure" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Back-pressure<a class="heading-anchor" href="#back-pressure" aria-label="Link to Back-pressure">#</a></h2>
+<p>Choose how <code>Subscribe</code> behaves when the ring buffer is full.</p>
+<div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Policy</th><th scope="col">Behavior</th></tr></thead><tbody>
+<tr><td><code>DropOldest</code></td><td>Evict the oldest queued event and accept the new one</td></tr>
+<tr><td><code>Block</code></td><td>Wait for capacity while respecting the caller context</td></tr>
+<tr><td><code>ReturnError</code></td><td>Return <code>ErrBufferFull</code> immediately</td></tr>
+</tbody></table></div>
+<p>Example:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1&lt;&lt;14,
+    GoEventBus.Block,
+)
+
+ctx, cancel := context.WithTimeout(
+    context.Background(),
+    50*time.Millisecond,
+)
+defer cancel()
+
+if err := store.Subscribe(ctx, event); err != nil {
+    log.Println(&quot;enqueue failed:&quot;, err)
+}</code></pre></div>
+</section>
+<section class="doc-section" id="async-mode" data-doc-section data-search-section data-title="Async &amp; shutdown" data-category="Event handling">
+<p class="doc-section-label mono">Event handling</p>
+<h2 tabindex="-1">Async &amp; shutdown<a class="heading-anchor" href="#async-mode" aria-label="Link to Async &amp; shutdown">#</a></h2>
+<p>Enable worker-pool dispatch with:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store.Async = true</code></pre></div>
+<p>The store uses a fixed worker pool sized to <code>runtime.NumCPU()</code>.</p>
+<p><code>Publish()</code> submits regular, ordered, and batch work to that pool.</p>
+<p>Call <code>Drain</code> or <code>Close</code> when shutting down:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">ctx, cancel := context.WithTimeout(
+    context.Background(),
+    5*time.Second,
+)
+defer cancel()
+
+if err := store.Drain(ctx); err != nil {
+    log.Println(&quot;drain failed:&quot;, err)
+}</code></pre></div>
+<p>Once shutdown begins, new subscriptions return <code>ErrEventStoreClosed</code>.</p>
+<aside class="doc-note"><strong>Shutdown is final.</strong><p><code>Close</code> is an alias for <code>Drain</code>. Both stop new subscriptions and finish accepted work. Call them outside event handlers to avoid waiting for the current handler itself.</p></aside>
+</section>
+<section class="doc-section" id="intelligent-event-routing" data-doc-section data-search-section data-title="Rules, cache &amp; Jev" data-category="Routing &amp; integrations">
+<p class="doc-section-label mono">Routing &amp; integrations</p>
+<h2 tabindex="-1">Rules, cache &amp; Jev<a class="heading-anchor" href="#intelligent-event-routing" aria-label="Link to Rules, cache &amp; Jev">#</a></h2>
+<p>GoEventBus can choose an event type before enqueueing it.</p>
+<p>The recommended pipeline is:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Flow</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Flow example"><code data-language="text">rules → cache → Jev → cache write → Subscribe → Publish</code></pre></div>
+<p>This keeps the fast path deterministic and only calls Jev when local logic cannot resolve the event type.</p>
+<section class="doc-subsection" id="1-define-candidates" data-search-section data-title="1. Define candidates" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">1. Define candidates<a class="heading-anchor" href="#1-define-candidates" aria-label="Link to 1. Define candidates">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type HouseWasSold struct{}
+
+candidates := []GoEventBus.EventCandidate{
+    {
+        Key:         &quot;user_created&quot;,
+        Projection:  &quot;user.created&quot;,
+        Description: &quot;A new user account was created&quot;,
+    },
+    {
+        Key:         &quot;house_sold&quot;,
+        Projection:  HouseWasSold{},
+        Description: &quot;A property sale was completed&quot;,
+    },
+    {
+        Key:         &quot;order_cancelled&quot;,
+        Projection:  &quot;order.cancelled&quot;,
+        Description: &quot;An existing order should be cancelled&quot;,
+    },
+}</code></pre></div>
+<p><code>Key</code> is the stable identifier exposed to the decision layer. <code>Projection</code> is the real GoEventBus dispatcher key.</p>
+<p>That separation lets Jev choose between simple string keys while the event bus can still dispatch to typed projections.</p>
+</section>
+<section class="doc-subsection" id="2-add-deterministic-rules" data-search-section data-title="2. Add deterministic rules" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">2. Add deterministic rules<a class="heading-anchor" href="#2-add-deterministic-rules" aria-label="Link to 2. Add deterministic rules">#</a></h3>
+<p>Rules run first. The first matching rule wins.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">rules := []GoEventBus.EventRule{
+    {
+        Name:   &quot;explicit-cancel&quot;,
+        Choice: &quot;order_cancelled&quot;,
+        Match: func(
+            _ context.Context,
+            state any,
+            _ []GoEventBus.EventCandidate,
+        ) bool {
+            input, ok := state.(map[string]any)
+            return ok &amp;&amp; input[&quot;action&quot;] == &quot;cancel&quot;
+        },
+    },
+}</code></pre></div>
+<p>Rules are intentionally evaluated before cache. Adding a new rule can therefore override an older cached model decision immediately.</p>
+</section>
+<section class="doc-subsection" id="3-add-a-decision-cache" data-search-section data-title="3. Add a decision cache" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">3. Add a decision cache<a class="heading-anchor" href="#3-add-a-decision-cache" aria-label="Link to 3. Add a decision cache">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">cache := GoEventBus.NewMemoryDecisionCache(5 * time.Minute)</code></pre></div>
+<p>The built-in cache is goroutine-safe and lazily expires entries.</p>
+<p>The default cache key is a SHA-256 hash of:</p>
+<ul>
+<li>the JSON-serializable decision state,</li>
+<li>candidate keys,</li>
+<li>candidate descriptions.</li>
+</ul>
+<p>Candidate ordering does not change the key. Projection values are deliberately excluded because typed projections may not be JSON-serializable.</p>
+<p>Need a different strategy? Supply <code>RuleCacheSelector.CacheKey</code>.</p>
+</section>
+<section class="doc-subsection" id="4-use-jev-as-the-fallback" data-search-section data-title="4. Use Jev as the fallback" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">4. Use Jev as the fallback<a class="heading-anchor" href="#4-use-jev-as-the-fallback" aria-label="Link to 4. Use Jev as the fallback">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">jev := &amp;GoEventBus.JevSelector{
+    APIKey: os.Getenv(&quot;OPENROUTER_API_KEY&quot;),
+}</code></pre></div>
+<p>The default model is:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Flow</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Flow example"><code data-language="text">typesafe/jev-1.13</code></pre></div>
+<p>The adapter calls OpenRouter&#x27;s Decisions API using the Go standard library, so the Jev integration adds no SDK dependency.</p>
+</section>
+<section class="doc-subsection" id="5-compose-the-router" data-search-section data-title="5. Compose the router" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">5. Compose the router<a class="heading-anchor" href="#5-compose-the-router" aria-label="Link to 5. Compose the router">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">selector := &amp;GoEventBus.RuleCacheSelector{
+    Rules:    rules,
+    Cache:    cache,
+    Fallback: jev,
+}</code></pre></div>
+<p>Then route and enqueue:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">state := map[string]any{
+    &quot;message&quot;: &quot;The property at 1 Main St was sold for $500000&quot;,
+}
+
+decision, err := store.DecideAndSubscribe(
+    context.Background(),
+    selector,
+    state,
+    GoEventBus.Event{
+        ID: &quot;evt-2&quot;,
+    },
+    candidates,
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf(
+    &quot;choice=%s confidence=%.2f probabilities=%v\n&quot;,
+    decision.Choice,
+    decision.Confidence,
+    decision.Probabilities,
+)
+
+store.Publish()</code></pre></div>
+<p>If a rule matches, Jev is never called. If the same decision state is already cached, Jev is never called. Only a cache miss reaches the model.</p>
+</section>
+<section class="doc-subsection" id="cache-behavior" data-search-section data-title="Cache behavior" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">Cache behavior<a class="heading-anchor" href="#cache-behavior" aria-label="Link to Cache behavior">#</a></h3>
+<p><code>DecisionCache</code> is intentionally small:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type DecisionCache interface {
+    Get(context.Context, string) (EventDecision, bool, error)
+    Set(context.Context, string, EventDecision) error
+}</code></pre></div>
+<p>That makes it straightforward to implement Redis, distributed, persistent, or application-specific caches.</p>
+<p>Cache failures are <strong>fail-open by default</strong>. Routing continues through the fallback selector because cache is treated as an optimization.</p>
+<p>Set:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">StrictCache: true</code></pre></div>
+<p>when cache failures should fail the routing call instead.</p>
+</section>
+</section>
+<section class="doc-section" id="external-providers" data-doc-section data-search-section data-title="Redis &amp; RabbitMQ" data-category="Routing &amp; integrations">
+<p class="doc-section-label mono">Routing &amp; integrations</p>
+<h2 tabindex="-1">Redis &amp; RabbitMQ<a class="heading-anchor" href="#external-providers" aria-label="Link to Redis &amp; RabbitMQ">#</a></h2>
+<p>The local <code>EventStore</code> remains the execution engine. Providers move events between processes.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type Provider interface {
+    Publish(context.Context, Event) error
+    Consume(context.Context, EventConsumer) error
+    Close() error
+}</code></pre></div>
+<p>Built-in providers:</p>
+<ul>
+<li><strong>Redis Streams</strong></li>
+<li><strong>RabbitMQ</strong></li>
+</ul>
+<p>Remote providers require a <strong>string projection</strong> because the projection becomes a stable broker routing name.</p>
+<section class="doc-subsection" id="redis-streams" data-search-section data-title="Redis Streams" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">Redis Streams<a class="heading-anchor" href="#redis-streams" aria-label="Link to Redis Streams">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">rdb := redis.NewClient(&amp;redis.Options{
+    Addr: &quot;localhost:6379&quot;,
+})
+
+provider, err := GoEventBus.NewRedisProvider(
+    GoEventBus.RedisProviderConfig{
+        Client:   rdb,
+        Stream:   &quot;events&quot;,
+        Group:    &quot;billing&quot;,
+        Consumer: &quot;billing-1&quot;,
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer provider.Close()
+
+go func() {
+    if err := store.Consume(ctx, provider); err != nil &amp;&amp;
+        !errors.Is(err, context.Canceled) {
+        log.Println(err)
+    }
+}()</code></pre></div>
+</section>
+<section class="doc-subsection" id="rabbitmq" data-search-section data-title="RabbitMQ" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">RabbitMQ<a class="heading-anchor" href="#rabbitmq" aria-label="Link to RabbitMQ">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">provider, err := GoEventBus.NewRabbitMQProvider(
+    GoEventBus.RabbitMQProviderConfig{
+        URL:        &quot;amqp://guest:guest@localhost:5672/&quot;,
+        Exchange:   &quot;events&quot;,
+        Queue:      &quot;billing&quot;,
+        BindingKey: &quot;order.*&quot;,
+        Consumer:   &quot;billing-1&quot;,
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer provider.Close()</code></pre></div>
+<p>Providers use <code>JSONCodec</code> by default. Supply a custom <code>DecodePayload</code> when consumers need concrete payload types rather than generic JSON values.</p>
+</section>
+</section>
+<section class="doc-section" id="dead-letter-queue" data-doc-section data-search-section data-title="Dead letter queue" data-category="Operations">
+<p class="doc-section-label mono">Operations</p>
+<h2 tabindex="-1">Dead letter queue<a class="heading-anchor" href="#dead-letter-queue" aria-label="Link to Dead letter queue">#</a></h2>
+<p>Attach a DLQ to retain handler failures and recovered panics.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store.DLQ = GoEventBus.NewDeadLetterQueue()</code></pre></div>
+<p>Inspect failures:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">for _, dead := range store.DLQ.Entries() {
+    log.Printf(
+        &quot;event=%s attempts=%d err=%v&quot;,
+        dead.Event.ID,
+        dead.Attempts,
+        dead.Err,
+    )
+}</code></pre></div>
+<p>Replay:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">if err := store.DLQ.Replay(ctx, store); err != nil {
+    log.Println(&quot;replay failed:&quot;, err)
+}</code></pre></div>
+<p>Handler panics are recovered and converted into errors so a single handler cannot kill the worker pool.</p>
+</section>
+<section class="doc-section" id="transactions" data-doc-section data-search-section data-title="Transactions" data-category="Operations">
+<p class="doc-section-label mono">Operations</p>
+<h2 tabindex="-1">Transactions<a class="heading-anchor" href="#transactions" aria-label="Link to Transactions">#</a></h2>
+<p>Transactions are local event buffers, not database-style atomic transactions.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">tx := store.BeginTransaction()
+
+tx.Publish(GoEventBus.Event{
+    ID:         &quot;evt-1&quot;,
+    Projection: &quot;order.created&quot;,
+    Data:       order,
+})
+
+tx.Publish(GoEventBus.Event{
+    ID:         &quot;evt-2&quot;,
+    Projection: &quot;invoice.created&quot;,
+    Data:       invoice,
+})
+
+if err := tx.Commit(ctx); err != nil {
+    tx.Rollback()
+    log.Fatal(err)
+}</code></pre></div>
+<p><code>Commit</code> executes buffered regular handlers synchronously and stops at the first error.</p>
+<p><code>Rollback</code> only discards events still buffered locally. It cannot undo side effects from handlers that already ran.</p>
+</section>
+<section class="doc-section" id="scheduling" data-doc-section data-search-section data-title="Scheduling" data-category="Operations">
+<p class="doc-section-label mono">Operations</p>
+<h2 tabindex="-1">Scheduling<a class="heading-anchor" href="#scheduling" aria-label="Link to Scheduling">#</a></h2>
+<p>Schedule an event at a time:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">timer := store.Schedule(
+    ctx,
+    time.Now().Add(10*time.Second),
+    event,
+)</code></pre></div>
+<p>Or after a duration:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">timer := store.ScheduleAfter(
+    ctx,
+    30*time.Second,
+    event,
+)</code></pre></div>
+<p>The returned <code>*time.Timer</code> may be stopped before it fires.</p>
+<p>Past times and non-positive durations are handled immediately.</p>
+<aside class="doc-note"><strong>Check the timer before stopping it.</strong><p>Past times and non-positive durations execute regular handlers immediately and return <code>nil</code>. Check <code>timer != nil</code> before calling <code>timer.Stop()</code>.</p></aside>
+</section>
+<section class="doc-section" id="metrics" data-doc-section data-search-section data-title="Metrics" data-category="Operations">
+<p class="doc-section-label mono">Operations</p>
+<h2 tabindex="-1">Metrics<a class="heading-anchor" href="#metrics" aria-label="Link to Metrics">#</a></h2>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">published, processed, failures := store.Metrics()
+
+fmt.Printf(
+    &quot;published=%d processed=%d errors=%d\n&quot;,
+    published,
+    processed,
+    failures,
+)</code></pre></div>
+<p>These counters cover event execution. Decision-layer metrics such as cache hit rate or Jev latency are intentionally not baked into the core API yet.</p>
+</section>
+<section class="doc-section" id="api-snapshot" data-doc-section data-search-section data-title="API reference" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">API reference<a class="heading-anchor" href="#api-snapshot" aria-label="Link to API reference">#</a></h2>
+
+<section class="doc-subsection" id="event-routing" data-search-section data-title="Event routing" data-category="API reference"><h3 tabindex="-1">Event routing<a class="heading-anchor" href="#event-routing" aria-label="Link to Event routing">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type EventCandidate struct {
+    Key         string
+    Projection  interface{}
+    Description string
+}
+
+type EventDecision struct {
+    Choice        string
+    Projection    interface{}
+    Confidence    float64
+    Probabilities map[string]float64
+    Model         string
+    RequestID     string
+}
+
+type EventSelector interface {
+    SelectEvent(
+        context.Context,
+        any,
+        []EventCandidate,
+    ) (EventDecision, error)
+}</code></pre></div>
+<p>Main implementations:</p>
+<ul>
+<li><code>JevSelector</code></li>
+<li><code>RuleCacheSelector</code></li>
+<li><code>MemoryDecisionCache</code></li>
+</ul>
+</section>
+<section class="doc-subsection" id="eventstore" data-search-section data-title="EventStore" data-category="API reference"><h3 tabindex="-1">EventStore<a class="heading-anchor" href="#eventstore" aria-label="Link to EventStore">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">func NewEventStore(
+    dispatcher *Dispatcher,
+    bufferSize uint64,
+    policy OverrunPolicy,
+) *EventStore</code></pre></div>
+<p><code>bufferSize</code> must be a non-zero power of two.</p>
+<p>Important methods:</p>
+<div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Method</th><th scope="col">Purpose</th></tr></thead><tbody>
+<tr><td><code>Subscribe</code></td><td>Enqueue a known event</td></tr>
+<tr><td><code>DecideAndSubscribe</code></td><td>Select a candidate event type and enqueue it</td></tr>
+<tr><td><code>Publish</code></td><td>Dispatch pending events</td></tr>
+<tr><td><code>RegisterOrdered</code></td><td>Preserve FIFO per ordering key</td></tr>
+<tr><td><code>RegisterBatch</code></td><td>Process projection events in chunks</td></tr>
+<tr><td><code>Consume</code></td><td>Feed provider events into the local store</td></tr>
+<tr><td><code>Use</code></td><td>Register middleware</td></tr>
+<tr><td><code>OnBefore</code> / <code>OnAfter</code> / <code>OnError</code></td><td>Register lifecycle hooks</td></tr>
+<tr><td><code>Metrics</code></td><td>Read event counters</td></tr>
+<tr><td><code>Schedule</code> / <code>ScheduleAfter</code></td><td>Schedule future events</td></tr>
+<tr><td><code>BeginTransaction</code></td><td>Start a local transaction buffer</td></tr>
+<tr><td><code>Drain</code> / <code>Close</code></td><td>Stop accepting events and finish in-flight work</td></tr>
+</tbody></table></div>
+</section>
+</section>
+<section class="doc-section" id="examples" data-doc-section data-search-section data-title="Examples" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">Examples<a class="heading-anchor" href="#examples" aria-label="Link to Examples">#</a></h2>
+<p>The repository includes runnable examples for both the classic event-bus path and the intelligent routing layer.</p>
+<div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Example</th><th scope="col">What it demonstrates</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_rules"><code>routing_rules</code></a></td><td>Deterministic first-match routing with <code>EventRule</code>; no model or cache required</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_cache"><code>routing_cache</code></a></td><td>Reusing a previous decision so the fallback selector is called only once</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_jev"><code>routing_jev</code></a></td><td>Full <code>rules → cache → Jev → GoEventBus</code> routing with OpenRouter</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/hello_world"><code>hello_world</code></a></td><td>Minimal direct <code>Subscribe → Publish</code> flow</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/middleware"><code>middleware</code></a></td><td>Handler middleware and lifecycle behavior</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/goroutines-subscribe-publisher"><code>goroutines-subscribe-publisher</code></a></td><td>Concurrent producers and publishing</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/drop_oldest"><code>drop_oldest</code></a></td><td><code>DropOldest</code> back-pressure</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/return_error"><code>return_error</code></a></td><td><code>ReturnError</code> back-pressure</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/handler_timeout"><code>handler_timeout</code></a></td><td>Handler context timeout</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/publisher_timeout"><code>publisher_timeout</code></a></td><td>Blocking publisher timeout</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/fasthttp"><code>fasthttp</code></a></td><td>HTTP integration</td></tr>
+</tbody></table></div>
+<p>Run the new routing examples directly:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go run ./examples/routing_rules
+go run ./examples/routing_cache
+OPENROUTER_API_KEY=... go run ./examples/routing_jev</code></pre></div>
+<p>See <a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/README.md"><code>examples/README.md</code></a> for a compact guide to all examples.</p>
+</section>
+<section class="doc-section" id="benchmarks" data-doc-section data-search-section data-title="Benchmarks" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">Benchmarks<a class="heading-anchor" href="#benchmarks" aria-label="Link to Benchmarks">#</a></h2>
+<p>Repository benchmarks on Apple M-series:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go test -bench . -benchtime=3s</code></pre></div>
+<div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Benchmark</th><th scope="col">Iterations</th><th scope="col">ns/op</th></tr></thead><tbody>
+<tr><td><code>BenchmarkSubscribe</code></td><td>27,080,376</td><td>40.37</td></tr>
+<tr><td><code>BenchmarkSubscribeParallel</code></td><td>26,418,999</td><td>38.42</td></tr>
+<tr><td><code>BenchmarkPublish</code></td><td>295,661,464</td><td>3.91</td></tr>
+<tr><td><code>BenchmarkPublishAfterPrefill</code></td><td>252,943,526</td><td>4.59</td></tr>
+<tr><td><code>BenchmarkSubscribeLargePayload</code></td><td>1,613,017</td><td>771.5</td></tr>
+<tr><td><code>BenchmarkPublishLargePayload</code></td><td>296,434,225</td><td>3.91</td></tr>
+<tr><td><code>BenchmarkEventStore_Async</code></td><td>2,816,988</td><td>436.5</td></tr>
+<tr><td><code>BenchmarkEventStore_Sync</code></td><td>2,638,519</td><td>428.5</td></tr>
+<tr><td><code>BenchmarkFastHTTPSync</code></td><td>6,275,112</td><td>163.8</td></tr>
+<tr><td><code>BenchmarkFastHTTPAsync</code></td><td>1,954,884</td><td>662.0</td></tr>
+<tr><td><code>BenchmarkFastHTTPParallel</code></td><td>4,489,274</td><td>262.3</td></tr>
+</tbody></table></div>
+<p>The intelligent routing path is intentionally outside these core dispatch benchmarks because rules, cache, and Jev have very different latency profiles.</p>
+</section>
+<section class="doc-section" id="design-principles" data-doc-section data-search-section data-title="Architecture" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">Architecture<a class="heading-anchor" href="#design-principles" aria-label="Link to Architecture">#</a></h2>
+<p>GoEventBus keeps decision-making and execution separate.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Flow</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Flow example"><code data-language="text">Decision layer                    Execution layer
+
+rules ─┐
+       ├─► choice ───────────────► EventStore
+cache ─┤                           ├─ ring buffer
+       │                           ├─ back-pressure
+Jev ───┘                           ├─ worker pool
+                                   ├─ ordering
+                                   ├─ batching
+                                   ├─ middleware/hooks
+                                   └─ DLQ</code></pre></div>
+<p>This separation means:</p>
+<ul>
+<li>the event bus does not depend on Jev,</li>
+<li>deterministic workloads do not pay model latency,</li>
+<li>model failures do not change core dispatch semantics,</li>
+<li>alternative selectors can implement the same <code>EventSelector</code> interface,</li>
+<li>alternative caches can implement <code>DecisionCache</code>,</li>
+<li>application code can mix direct and intelligent routing in the same store.</li>
+</ul>
+</section>
+<section class="doc-section" id="contributing" data-doc-section data-search-section data-title="Contributing" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">Contributing<a class="heading-anchor" href="#contributing" aria-label="Link to Contributing">#</a></h2>
+<p>Issues and pull requests are welcome.</p>
+<p>Run the test suite with:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go test -race ./...</code></pre></div>
+<p>Integration tests:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go test -race -tags=integration -timeout=5m ./...</code></pre></div>
+<p>Quality checks used by CI include <code>go vet</code> and <code>staticcheck</code>.</p>
+</section>
+<section class="doc-section" id="license" data-doc-section data-search-section data-title="License" data-category="Reference">
+<p class="doc-section-label mono">Reference</p>
+<h2 tabindex="-1">License<a class="heading-anchor" href="#license" aria-label="Link to License">#</a></h2>
+<p>Distributed under the MIT License. See <code>LICENSE</code>.</p>
+</section>
+      <footer class="docs-footer"><a href="../">GoEventBus home</a><span class="mono">PROTOCOL LATTICE · MIT LICENSE</span><a href="#overview">Back to top</a></footer>
+    </main>
+  </div>
+  <p id="doc-copy-status" class="visually-hidden" role="status" aria-live="polite"></p>
+</body>
+</html>
