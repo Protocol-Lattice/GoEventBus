@@ -83,6 +83,12 @@ func withProviderFactory(factory func() (Provider, error)) EventStoreOption {
 	}
 }
 
+func (es *EventStore) hasConfiguredProvider() bool {
+	es.providerMu.Lock()
+	defer es.providerMu.Unlock()
+	return es.provider != nil || es.providerFactory != nil
+}
+
 func (es *EventStore) providerForUse() (Provider, error) {
 	es.providerMu.Lock()
 	defer es.providerMu.Unlock()
