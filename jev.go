@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	// ErrNilEventSelector is returned when DecideAndSubscribe is called without
-	// an EventSelector.
+	// ErrNilEventSelector is returned when a selector-aware operation is called
+	// without an EventSelector.
 	ErrNilEventSelector = errors.New("goeventbus: event selector is nil")
 	// ErrNoEventCandidates is returned when there are no event types to choose from.
 	ErrNoEventCandidates = errors.New("goeventbus: no event candidates")
