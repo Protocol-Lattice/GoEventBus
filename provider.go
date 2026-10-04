@@ -93,6 +93,9 @@ func (es *EventStore) providerForUse() (Provider, error) {
 	es.providerMu.Lock()
 	defer es.providerMu.Unlock()
 
+	if es.closed.Load() {
+		return nil, ErrEventStoreClosed
+	}
 	if es.provider != nil {
 		return es.provider, nil
 	}
@@ -115,6 +118,7 @@ func (es *EventStore) closeConfiguredProvider() error {
 	es.providerMu.Lock()
 	provider := es.provider
 	es.provider = nil
+	es.providerFactory = nil
 	es.providerMu.Unlock()
 
 	if provider == nil {
