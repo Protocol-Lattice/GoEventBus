@@ -1,8 +1,9 @@
-
-# GoEventBus
 <p align="center">
   <img src="https://github.com/Protocol-Lattice/GoEventBus/blob/main/logo.png?raw=true">
 </p>
+
+# GoEventBus
+
 **A high-performance event bus for Go with deterministic rules, cached decisions, and optional Jev-powered event routing.**
 
 GoEventBus combines a bounded MPMC in-memory event bus with fan-out, ordered and batch handlers, middleware, lifecycle hooks, dead-letter handling, Redis Streams, RabbitMQ, and an optional decision layer for choosing which event type should execute.
