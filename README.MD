@@ -321,6 +321,7 @@ The repository includes runnable examples for both the classic event-bus path an
 | [`routing_rules`](examples/routing_rules) | Deterministic first-match routing with `EventRule`; no model or cache required |
 | [`routing_cache`](examples/routing_cache) | Reusing a previous decision so the fallback selector is called only once |
 | [`routing_jev`](examples/routing_jev) | Full `rules → cache → Jev → GoEventBus` routing with OpenRouter |
+| [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev event selection buffered until transaction commit |
 | [`hello_world`](examples/hello_world) | Minimal direct `Subscribe → Publish` flow |
 | [`middleware`](examples/middleware) | Handler middleware and lifecycle behavior |
 | [`goroutines-subscribe-publisher`](examples/goroutines-subscribe-publisher) | Concurrent producers and publishing |
@@ -338,6 +339,7 @@ Run the new routing examples directly:
 go run ./examples/routing_rules
 go run ./examples/routing_cache
 OPENROUTER_API_KEY=... go run ./examples/routing_jev
+OPENROUTER_API_KEY=... go run ./examples/transaction_jev
 ```
 
 See [`examples/README.md`](examples/README.md) for a compact guide to all examples.
