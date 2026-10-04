@@ -44,6 +44,14 @@ type RabbitMQProvider struct {
 	closed    atomic.Bool
 }
 
+// WithRabbitMQ configures RabbitMQ as the EventStore provider. The provider
+// is created lazily on first PublishToProvider or Consume call.
+func WithRabbitMQ(config RabbitMQProviderConfig) EventStoreOption {
+	return withProviderFactory(func() (Provider, error) {
+		return NewRabbitMQProvider(config)
+	})
+}
+
 // NewRabbitMQProvider connects to RabbitMQ, enables publisher confirms, and
 // declares the configured topic-exchange topology. The provider owns and
 // closes the AMQP connection.
