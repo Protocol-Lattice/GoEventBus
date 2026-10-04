@@ -49,13 +49,43 @@
 
     <div class="stack-strip"><span class="mono">SMALL CORE. CONNECTED SYSTEMS.</span><div><span class="stack-name go-word">Go <small>1.23+</small></span><span class="stack-name">Redis <small>Streams</small></span><span class="stack-name">RabbitMQ</span><span class="stack-name jev-word">✳ Jev <small>optional</small></span></div></div>
 
-    <section class="principle-section" aria-labelledby="principle-title">
+    <section class="principle-section" id="principle" aria-labelledby="principle-title">
       <div class="section-kicker mono"><span>01 / THE PRINCIPLE</span><span>SEPARATE THE CHOICE FROM THE WORK</span></div>
       <div class="principle-grid">
-        <div><h2 id="principle-title">Inference stays<br>out of the<br><span>hot path.</span></h2><p>Choose the event before you enqueue it. Then let a bounded MPMC ring buffer and Go handlers do what they do best.</p><p>Already know the event type? Call <code>Subscribe</code> directly. The decision layer is entirely optional.</p><a class="text-link" href="https://github.com/Protocol-Lattice/GoEventBus#design-principles" target="_blank" rel="noopener noreferrer">Explore the architecture</a></div>
-        <div class="execution-window">
-          <div class="execution-heading mono"><span>execution.engine</span><span aria-hidden="true">[ GO ]</span></div>
-          <div class="execution-body"><div class="execution-entry"><span class="mono">SELECTED EVENT</span><code>store.Subscribe(ctx, event)</code></div><div class="vertical-wire" aria-hidden="true"></div><div class="ring-label mono"><span>BOUNDED MPMC RING</span><span>FIFO</span></div><div class="execution-ring" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="vertical-wire" aria-hidden="true"></div><div class="publish-call"><code>store.Publish()</code><span class="mono">dispatch pending events</span></div><div class="fanout-lines" aria-hidden="true"><i></i><i></i><i></i></div><div class="handler-grid"><div><span aria-hidden="true">{ }</span><span>Fan-out</span></div><div><span aria-hidden="true">≡</span><span>Ordered</span></div><div><span aria-hidden="true">▤</span><span>Batch</span></div></div><div class="execution-bottom mono">YOUR HANDLERS. YOUR EXECUTION.</div></div>
+        <div class="principle-copy">
+          <h2 id="principle-title">Inference stays<br>out of the<br><span>hot path.</span></h2>
+          <p>Choose the event before you enqueue it. Then let a bounded MPMC ring buffer and Go handlers do what they do best.</p>
+          <p class="principle-note">The decision layer is optional. Execution stays in Go.</p>
+          <a class="text-link" href="https://github.com/Protocol-Lattice/GoEventBus#design-principles" target="_blank" rel="noopener noreferrer">Explore the architecture</a>
+        </div>
+        <div class="principle-diagram" role="group" aria-label="Optional Jev decision layer feeds a selected event into the Go execution engine">
+          <div class="decision-layer">
+            <div class="decision-card">
+              <h3 class="decision-label mono">01. DECISION<br>(OPTIONAL)</h3>
+              <div class="decision-node">
+                <svg class="decision-symbol" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 3v42M3 24h42M9 9l30 30M9 39 39 9" stroke="currentColor" stroke-width="4"/></svg>
+                <span class="decision-name">Jev</span>
+                <span class="decision-description mono">select event<br>with inference</span>
+              </div>
+            </div>
+            <p class="decision-caption mono">INFERENCE HAPPENS HERE. NOT IN THE HOT PATH.</p>
+          </div>
+          <div class="decision-connector" aria-hidden="true"><span class="mono">event</span></div>
+          <div class="execution-window">
+            <div class="execution-heading mono"><span>execution.engine</span><span aria-hidden="true">[ GO ]</span></div>
+            <div class="execution-body">
+              <h3 class="execution-label mono">02. EXECUTION (HOT PATH)</h3>
+              <div class="execution-entry"><span class="mono">SELECTED EVENT</span><code>store.Subscribe(ctx, event)</code></div>
+              <div class="vertical-wire" aria-hidden="true"></div>
+              <div class="ring-label mono"><span>BOUNDED MPMC RING</span><span>FIFO</span></div>
+              <div class="execution-ring" aria-hidden="true"><span class="decision-ring-connector"><span class="mono">event</span></span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="vertical-wire" aria-hidden="true"></div>
+              <div class="publish-call"><code>store.Publish()</code><span class="mono">dispatch pending events</span></div>
+              <div class="fanout-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="handler-grid"><div><span aria-hidden="true">{ }</span><span>Fan-out</span></div><div><span aria-hidden="true">≡</span><span>Ordered</span></div><div><span aria-hidden="true">▤</span><span>Batch</span></div></div>
+              <div class="execution-bottom mono">YOUR HANDLERS. YOUR EXECUTION.</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="principle-foot mono"><span>DETERMINISM WHERE YOU WANT IT.</span><span>INTELLIGENCE WHERE YOU NEED IT.</span></div>
