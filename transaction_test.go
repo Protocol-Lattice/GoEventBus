@@ -28,6 +28,93 @@ func (f transactionSelectorFunc) SelectEvent(
 	return f(ctx, state, candidates)
 }
 
+type transactionRecordingProvider struct {
+	published []Event
+	failAt    int
+}
+
+func (p *transactionRecordingProvider) Publish(_ context.Context, event Event) error {
+	if p.failAt > 0 && len(p.published)+1 == p.failAt {
+		return errors.New("broker publish failed")
+	}
+	p.published = append(p.published, event)
+	return nil
+}
+
+func (p *transactionRecordingProvider) Consume(context.Context, EventConsumer) error {
+	return nil
+}
+
+func (p *transactionRecordingProvider) Close() error {
+	return nil
+}
+
+func TestTransaction_CommitPublishesToConfiguredProvider(t *testing.T) {
+	var localCalls uint64
+	dispatcher := Dispatcher{
+		"remote": hs(makeCounterHandler(&localCalls)),
+	}
+	provider := &transactionRecordingProvider{}
+	store := NewEventStore(&dispatcher, 8, DropOldest, WithProvider(provider))
+	t.Cleanup(func() { _ = store.Close(context.Background()) })
+
+	tx := store.BeginTransaction()
+	tx.Publish(Event{ID: "broker-1", Projection: "remote"})
+	tx.Publish(Event{ID: "broker-2", Projection: "remote"})
+
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := atomic.LoadUint64(&localCalls); got != 0 {
+		t.Fatalf("local handler calls = %d, want 0 before provider consumption", got)
+	}
+	if len(provider.published) != 2 {
+		t.Fatalf("provider publishes = %d, want 2", len(provider.published))
+	}
+	if provider.published[0].ID != "broker-1" || provider.published[1].ID != "broker-2" {
+		t.Fatalf("provider publish order = [%q %q], want [broker-1 broker-2]",
+			provider.published[0].ID, provider.published[1].ID)
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatalf("second Commit: %v", err)
+	}
+	if len(provider.published) != 2 {
+		t.Fatalf("second Commit republished events: got %d publishes, want 2", len(provider.published))
+	}
+}
+
+func TestTransaction_CommitProviderFailureRetainsOnlyUnpublishedSuffix(t *testing.T) {
+	provider := &transactionRecordingProvider{failAt: 2}
+	store := NewEventStore(&Dispatcher{}, 8, DropOldest, WithProvider(provider))
+	t.Cleanup(func() { _ = store.Close(context.Background()) })
+
+	tx := store.BeginTransaction()
+	tx.Publish(Event{ID: "broker-1", Projection: "remote"})
+	tx.Publish(Event{ID: "broker-2", Projection: "remote"})
+	tx.Publish(Event{ID: "broker-3", Projection: "remote"})
+
+	if err := tx.Commit(context.Background()); err == nil {
+		t.Fatal("Commit succeeded, want provider error")
+	}
+	if len(provider.published) != 1 || provider.published[0].ID != "broker-1" {
+		t.Fatalf("published before failure = %#v, want only broker-1", provider.published)
+	}
+
+	provider.failAt = 0
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatalf("retry Commit: %v", err)
+	}
+	if len(provider.published) != 3 {
+		t.Fatalf("provider publishes after retry = %d, want 3", len(provider.published))
+	}
+	for i, want := range []string{"broker-1", "broker-2", "broker-3"} {
+		if provider.published[i].ID != want {
+			t.Fatalf("provider publish %d = %q, want %q", i, provider.published[i].ID, want)
+		}
+	}
+}
+
 func TestTransaction_DecideAndPublishWithJev(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
