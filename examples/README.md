@@ -73,6 +73,22 @@ Flow:
 state -> rules/cache/Jev -> selected event -> transaction buffer -> Commit -> handler
 ```
 
+### `schedule_jev`
+
+Uses Rules / Cache / Jev to resolve the event type before starting a timer.
+The decision is made immediately; the selected event is dispatched only when
+the timer fires.
+
+```bash
+OPENROUTER_API_KEY=... go run ./examples/schedule_jev
+```
+
+Flow:
+
+```text
+state -> rules/cache/Jev -> selected event -> timer -> Subscribe -> Publish -> handler
+```
+
 ## Core event bus
 
 | Example | Purpose |
@@ -89,6 +105,7 @@ state -> rules/cache/Jev -> selected event -> transaction buffer -> Commit -> ha
 | `redis` | Redis Streams configured directly on `NewEventStore` |
 | `rabbitmq` | RabbitMQ configured directly on `NewEventStore` |
 | `transaction_jev` | Rules/Cache/Jev event selection buffered until transaction commit |
+| `schedule_jev` | Rules/Cache/Jev event selection before delayed scheduling |
 
 ## Broker-backed stores
 
