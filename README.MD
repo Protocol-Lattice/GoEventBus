@@ -63,7 +63,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Lifecycle hooks** with `OnBefore`, `OnAfter`, and `OnError`.
 - **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
 - **Dead-letter queue** with replay support and panic recovery.
-- **Redis Streams and RabbitMQ providers** for cross-process delivery.
+- **Redis Streams and RabbitMQ EventStore options** for cross-process delivery.
 - **Transactions** with local buffering and synchronous commit.
 - **Scheduling** with absolute and relative timers.
 - **Metrics** for published, processed, and failed events.
@@ -320,6 +320,8 @@ The repository includes runnable examples for both the classic event-bus path an
 | [`handler_timeout`](examples/handler_timeout) | Handler context timeout |
 | [`publisher_timeout`](examples/publisher_timeout) | Blocking publisher timeout |
 | [`fasthttp`](examples/fasthttp) | HTTP integration |
+| [`redis`](examples/redis) | Redis Streams configured directly on `NewEventStore` |
+| [`rabbitmq`](examples/rabbitmq) | RabbitMQ configured directly on `NewEventStore` |
 
 Run the new routing examples directly:
 
@@ -567,22 +569,42 @@ Once shutdown begins, new subscriptions return `ErrEventStoreClosed`.
 
 # External Providers
 
-The local `EventStore` remains the execution engine. Providers move events between processes.
+Redis Streams and RabbitMQ are optional transports configured directly on the
+`EventStore`. The original three-argument constructor still works unchanged:
 
 ```go
-type Provider interface {
-    Publish(context.Context, Event) error
-    Consume(context.Context, EventConsumer) error
-    Close() error
-}
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+)
 ```
 
-Built-in providers:
+Add a broker as a fourth functional option when cross-process delivery is
+needed:
 
-- **Redis Streams**
-- **RabbitMQ**
+```go
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRedis(redisConfig),
+)
+```
 
-Remote providers require a **string projection** because the projection becomes a stable broker routing name.
+The configured provider is created lazily on the first broker operation and is
+owned by the store. `Drain` / `Close` closes it. The Redis provider still does
+not close an injected Redis client, so shared client ownership remains with the
+application.
+
+Broker-backed stores use two methods:
+
+- `PublishToProvider(ctx, event)` sends an event to the configured broker.
+- `Consume(ctx)` consumes from the configured broker and feeds events through
+  the local `Dispatcher`, middleware, hooks, ordering, batching, and DLQ path.
+
+Remote providers require a **string projection** because the projection becomes
+the broker routing name.
 
 ## Redis Streams
 
@@ -591,46 +613,89 @@ rdb := redis.NewClient(&redis.Options{
     Addr: "localhost:6379",
 })
 
-provider, err := GoEventBus.NewRedisProvider(
-    GoEventBus.RedisProviderConfig{
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRedis(GoEventBus.RedisProviderConfig{
         Client:   rdb,
         Stream:   "events",
         Group:    "billing",
         Consumer: "billing-1",
-    },
+        StartID:  "0",
+    }),
 )
-if err != nil {
-    log.Fatal(err)
-}
-defer provider.Close()
 
 go func() {
-    if err := store.Consume(ctx, provider); err != nil &&
-        !errors.Is(err, context.Canceled) {
+    if err := store.Consume(ctx); err != nil &&
+        !errors.Is(err, context.Canceled) &&
+        !errors.Is(err, GoEventBus.ErrProviderClosed) {
         log.Println(err)
     }
 }()
+
+if err := store.PublishToProvider(ctx, GoEventBus.Event{
+    ID:         "evt-redis-1",
+    Projection: "order.created",
+    Data:       order,
+}); err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## RabbitMQ
 
 ```go
-provider, err := GoEventBus.NewRabbitMQProvider(
-    GoEventBus.RabbitMQProviderConfig{
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRabbitMQ(GoEventBus.RabbitMQProviderConfig{
         URL:        "amqp://guest:guest@localhost:5672/",
         Exchange:   "events",
         Queue:      "billing",
         BindingKey: "order.*",
         Consumer:   "billing-1",
-    },
+    }),
 )
+
+go func() {
+    if err := store.Consume(ctx); err != nil &&
+        !errors.Is(err, context.Canceled) &&
+        !errors.Is(err, GoEventBus.ErrProviderClosed) {
+        log.Println(err)
+    }
+}()
+
+if err := store.PublishToProvider(ctx, GoEventBus.Event{
+    ID:         "evt-rabbit-1",
+    Projection: "order.created",
+    Data:       order,
+}); err != nil {
+    log.Fatal(err)
+}
+```
+
+Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when
+consumers need concrete payload types rather than generic JSON values.
+
+The low-level provider API remains available for custom lifecycle management:
+
+```go
+provider, err := GoEventBus.NewRedisProvider(redisConfig)
 if err != nil {
     log.Fatal(err)
 }
-defer provider.Close()
+
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithProvider(provider),
+)
 ```
 
-Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when consumers need concrete payload types rather than generic JSON values.
+See `examples/redis` and `examples/rabbitmq` for runnable examples.
 
 ---
 
@@ -785,6 +850,7 @@ func NewEventStore(
     dispatcher *Dispatcher,
     bufferSize uint64,
     policy OverrunPolicy,
+    options ...EventStoreOption,
 ) *EventStore
 ```
 
@@ -799,7 +865,8 @@ Important methods:
 | `Publish` | Dispatch pending events |
 | `RegisterOrdered` | Preserve FIFO per ordering key |
 | `RegisterBatch` | Process projection events in chunks |
-| `Consume` | Feed provider events into the local store |
+| `Consume` | Feed configured or explicit provider events into the local store |
+| `PublishToProvider` | Publish an event through the provider configured on `NewEventStore` |
 | `Use` | Register middleware |
 | `OnBefore` / `OnAfter` / `OnError` | Register lifecycle hooks |
 | `Metrics` | Read event counters |
