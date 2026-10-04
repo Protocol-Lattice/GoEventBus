@@ -66,6 +66,33 @@ The example exits without making a request when `OPENROUTER_API_KEY` is not set.
 | `publisher_timeout` | Blocking publisher timeout |
 | `handler_timeout` | Handler context timeout |
 | `fasthttp` | fasthttp integration |
+| `redis` | Redis Streams configured directly on `NewEventStore` |
+| `rabbitmq` | RabbitMQ configured directly on `NewEventStore` |
+
+## Broker-backed stores
+
+Redis Streams and RabbitMQ are EventStore options, so application code does not
+need to keep a separate provider variable:
+
+```go
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRedis(redisConfig),
+)
+```
+
+Use `store.PublishToProvider(ctx, event)` to send an event to the configured
+broker and `store.Consume(ctx)` to consume broker events into the local
+dispatcher.
+
+Run the examples with a broker available locally:
+
+```bash
+go run ./examples/redis
+go run ./examples/rabbitmq
+```
 
 ## Choosing a routing path
 
