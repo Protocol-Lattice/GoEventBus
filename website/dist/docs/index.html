@@ -209,7 +209,7 @@ dispatcher.Register(
 <li><strong>Back-pressure policies</strong>: <code>DropOldest</code>, <code>Block</code>, or <code>ReturnError</code>.</li>
 <li><strong>Dead-letter queue</strong> with replay support and panic recovery.</li>
 <li><strong>Redis Streams and RabbitMQ providers</strong> for cross-process delivery.</li>
-<li><strong>Transactions</strong> with local buffering and synchronous commit.</li>
+<li><strong>Transactions</strong> with local buffering and transport-aware commit to local handlers or the configured broker.</li>
 <li><strong>Scheduling</strong> with absolute and relative timers.</li>
 <li><strong>Metrics</strong> for published, processed, and failed events.</li>
 <li><strong>Pluggable decision cache</strong> through the <code>DecisionCache</code> interface.</li>
@@ -671,9 +671,10 @@ if err := tx.Commit(ctx); err != nil {
 }</code></pre></div>
 <div class="doc-flow" aria-label="Rules cache Jev decision transaction commit"><span><small>01</small>Rules / Cache / Jev</span><span><small>02</small>DecideAndPublish</span><span><small>03</small>Transaction buffer</span><span><small>04</small>Commit</span></div>
 <p><code>DecideAndPublish</code> resolves the event projection immediately and buffers only the selected event. Routing failures do not mutate the transaction, and <code>Rollback</code> discards intelligently selected events just like direct events.</p>
-<aside class="doc-note"><strong>Transactions stay local.</strong><p>Even when the parent EventStore has Redis or RabbitMQ configured, transaction commits execute buffered regular handlers synchronously. They do not publish transaction entries to the broker.</p></aside>
+<aside class="doc-note"><strong>Commit follows the EventStore transport.</strong><p>Transactions always buffer events locally until <code>Commit</code>. On a normal local store, commit executes buffered regular handlers synchronously. With <code>WithRedis(...)</code>, <code>WithRabbitMQ(...)</code>, or <code>WithProvider(...)</code>, commit publishes the buffered events to that provider instead. Local handlers run only when those broker events are consumed back through <code>store.Consume(ctx)</code>.</p></aside>
 </section>
-<p><code>Commit</code> stops at the first handler error. Transactions are not database-style atomic transactions, so handler side effects that already ran cannot be undone.</p>
+<p>Local <code>Commit</code> stops at the first handler error. Broker-backed <code>Commit</code> publishes events in transaction order, stops at the first provider error, and removes only the prefix already confirmed by the provider. Retrying the transaction therefore starts from the first unpublished event instead of publishing the confirmed prefix again.</p>
+<p>Transactions are not database-style atomic transactions: handler side effects or broker publishes that already succeeded cannot be undone.</p>
 <p><code>Rollback</code> discards only events still buffered locally and never rewinds the shared EventStore ring.</p>
 </section>
 <section class="doc-section" id="scheduling" data-doc-section data-search-section data-title="Scheduling" data-category="Operations">
@@ -801,7 +802,7 @@ type EventSelector interface {
 <tr><td><code>Metrics</code></td><td>Read event counters</td></tr>
 <tr><td><code>Schedule</code> / <code>ScheduleAfter</code></td><td>Schedule known events</td></tr>
 <tr><td><code>DecideAndSchedule</code> / <code>DecideAndScheduleAfter</code></td><td>Select with Rules/Cache/Jev, then schedule the resolved event</td></tr>
-<tr><td><code>BeginTransaction</code></td><td>Start a local transaction buffer; use <code>tx.DecideAndPublish</code> for Rules/Cache/Jev selection</td></tr>
+<tr><td><code>BeginTransaction</code></td><td>Buffer events until commit; local stores execute regular handlers, provider-backed stores publish to the configured broker</td></tr>
 <tr><td><code>Drain</code> / <code>Close</code></td><td>Stop accepting events and finish in-flight work</td></tr>
 </tbody></table></div>
 </section>
@@ -814,7 +815,7 @@ type EventSelector interface {
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_rules"><code>routing_rules</code></a></td><td>Deterministic first-match routing with <code>EventRule</code>; no model or cache required</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_cache"><code>routing_cache</code></a></td><td>Reusing a previous decision so the fallback selector is called only once</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_jev"><code>routing_jev</code></a></td><td>Full <code>rules → cache → Jev → GoEventBus</code> routing with OpenRouter</td></tr>
-<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/transaction_jev"><code>transaction_jev</code></a></td><td>Rules/Cache/Jev event selection buffered until transaction commit</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/transaction_jev"><code>transaction_jev</code></a></td><td>Rules/Cache/Jev selection buffered until commit, then dispatched locally or published through the configured provider</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/schedule_jev"><code>schedule_jev</code></a></td><td>Rules/Cache/Jev event selection before delayed scheduling</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/hello_world"><code>hello_world</code></a></td><td>Minimal direct <code>Subscribe → Publish</code> flow</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/middleware"><code>middleware</code></a></td><td>Handler middleware and lifecycle behavior</td></tr>

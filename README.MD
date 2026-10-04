@@ -64,7 +64,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
 - **Dead-letter queue** with replay support and panic recovery.
 - **Redis Streams and RabbitMQ EventStore options** for cross-process delivery.
-- **Transactions** with local buffering, synchronous commit, and optional Rules/Cache/Jev event selection.
+- **Transactions** with local buffering, transport-aware commit, and optional Rules/Cache/Jev event selection.
 - **Scheduling** with absolute/relative timers and optional Rules/Cache/Jev event selection.
 - **Metrics** for published, processed, and failed events.
 - **Pluggable decision cache** through the `DecisionCache` interface.
@@ -321,7 +321,7 @@ The repository includes runnable examples for both the classic event-bus path an
 | [`routing_rules`](examples/routing_rules) | Deterministic first-match routing with `EventRule`; no model or cache required |
 | [`routing_cache`](examples/routing_cache) | Reusing a previous decision so the fallback selector is called only once |
 | [`routing_jev`](examples/routing_jev) | Full `rules → cache → Jev → GoEventBus` routing with OpenRouter |
-| [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev event selection buffered until transaction commit |
+| [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev selection buffered until commit, then dispatched locally or published through the configured provider |
 | [`schedule_jev`](examples/schedule_jev) | Rules/Cache/Jev event selection before delayed scheduling |
 | [`hello_world`](examples/hello_world) | Minimal direct `Subscribe → Publish` flow |
 | [`middleware`](examples/middleware) | Handler middleware and lifecycle behavior |
@@ -776,7 +776,7 @@ Handler panics are recovered and converted into errors so a single handler canno
 
 # Transactions
 
-Transactions are local event buffers, not database-style atomic transactions.
+Transactions buffer events locally until commit, but commit delivery follows the parent `EventStore` transport. They are not database-style atomic transactions.
 
 Known events can still be buffered directly:
 
@@ -857,13 +857,17 @@ resolved event. This means:
 - `RuleCacheSelector`, `JevSelector`, and custom `EventSelector`
   implementations all use the same transaction API.
 
-Transactions remain **local** even when the parent `EventStore` has Redis or
-RabbitMQ configured. A transaction commit executes its buffered regular
-handlers synchronously; it does not publish transaction entries to a broker.
+Transaction commit follows the parent `EventStore` transport. With a normal
+local store, `Commit` executes buffered regular handlers synchronously. With
+`WithRedis(...)`, `WithRabbitMQ(...)`, or `WithProvider(...)`, `Commit`
+publishes buffered events to the configured provider instead; local handlers run
+only when those events are consumed back into an `EventStore`.
 
-`Commit` stops at the first handler error. As before, transactions are not
-database-style atomic transactions: side effects from handlers that already ran
-cannot be undone.
+Local `Commit` stops at the first handler error. Broker-backed `Commit` stops at
+the first publish error and removes only the prefix already confirmed by the
+provider, so retrying starts from the first unpublished event. Transactions are
+still not database-style atomic transactions: handler side effects or broker
+publishes that already succeeded cannot be undone.
 
 `Rollback` only discards events still buffered locally and never rewinds the
 shared EventStore ring.
@@ -1055,7 +1059,7 @@ Important methods:
 | `Metrics` | Read event counters |
 | `Schedule` / `ScheduleAfter` | Schedule known events |
 | `DecideAndSchedule` / `DecideAndScheduleAfter` | Select with Rules/Cache/Jev, then schedule the resolved event |
-| `BeginTransaction` | Start a local transaction buffer; use `tx.DecideAndPublish` for Rules/Cache/Jev selection |
+| `BeginTransaction` | Buffer events for commit; local stores execute handlers, provider-backed stores publish to the broker |
 | `Drain` / `Close` | Stop accepting events and finish in-flight work |
 
 ---

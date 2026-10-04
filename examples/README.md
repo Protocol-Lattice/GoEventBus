@@ -60,8 +60,10 @@ The example exits without making a request when `OPENROUTER_API_KEY` is not set.
 ### `transaction_jev`
 
 Uses the same Rules / Cache / Jev selector pipeline inside a transaction.
-`DecideAndPublish` resolves the projection immediately, buffers the selected
-event, and handlers run only when the transaction commits.
+`DecideAndPublish` resolves the projection immediately and buffers the selected
+event. On commit, local stores run regular handlers synchronously; stores created
+with `WithRedis(...)`, `WithRabbitMQ(...)`, or `WithProvider(...)` publish the
+buffered events to that provider instead.
 
 ```bash
 OPENROUTER_API_KEY=... go run ./examples/transaction_jev
@@ -70,7 +72,7 @@ OPENROUTER_API_KEY=... go run ./examples/transaction_jev
 Flow:
 
 ```text
-state -> rules/cache/Jev -> selected event -> transaction buffer -> Commit -> handler
+state -> rules/cache/Jev -> selected event -> transaction buffer -> Commit -> local handler OR broker
 ```
 
 ### `schedule_jev`

@@ -15,9 +15,11 @@ import (
 // implementation rewound global queue positions on Rollback and could therefore
 // erase events owned by concurrent producers.
 //
-// Commit delivers buffered events synchronously and returns the first handler
-// error. It does not use batch or ordered handlers, matching the historical
-// transaction contract. Event selection happens before buffering; handler side
+// Commit routes buffered events through the parent EventStore. When a provider
+// is configured, buffered events are published to that provider in order and
+// local handlers are left to the provider consumer path. Without a provider,
+// regular handlers still execute synchronously, matching the historical local
+// transaction contract. Event selection happens before buffering; delivery side
 // effects remain deferred until Commit.
 type Transaction struct {
 	store    *EventStore
@@ -63,6 +65,11 @@ func (tx *Transaction) DecideAndPublish(
 
 // Commit delivers the events buffered when the call begins. Events appended
 // concurrently stay in the transaction for a later Commit.
+//
+// If the parent EventStore has a configured provider, Commit publishes buffered
+// events to that provider instead of invoking local handlers. Confirmed broker
+// publishes are removed from the transaction immediately; if a later publish
+// fails, only the failed event and the remaining suffix stay buffered for retry.
 func (tx *Transaction) Commit(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -79,6 +86,24 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 	events := append([]Event(nil), tx.events...)
 	tx.mu.Unlock()
 
+	if tx.store.hasConfiguredProvider() {
+		provider, err := tx.store.providerForUse()
+		if err != nil {
+			return err
+		}
+
+		published := 0
+		for _, event := range events {
+			if err := provider.Publish(ctx, event); err != nil {
+				tx.removeCommitted(published)
+				return err
+			}
+			published++
+		}
+		tx.removeCommitted(published)
+		return nil
+	}
+
 	for _, event := range events {
 		event.Ctx = ctx
 		atomic.AddUint64(&tx.store.publishedCount, 1)
@@ -89,10 +114,18 @@ func (tx *Transaction) Commit(ctx context.Context) error {
 		}
 	}
 
-	tx.mu.Lock()
-	tx.events = tx.events[len(events):]
-	tx.mu.Unlock()
+	tx.removeCommitted(len(events))
 	return nil
+}
+
+func (tx *Transaction) removeCommitted(count int) {
+	if count == 0 {
+		return
+	}
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	tx.events = tx.events[count:]
 }
 
 // Rollback discards only this transaction's local buffer. It never mutates
