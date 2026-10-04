@@ -51,6 +51,53 @@ type EventSelector interface {
 	SelectEvent(context.Context, any, []EventCandidate) (EventDecision, error)
 }
 
+func selectEvent(
+	ctx context.Context,
+	selector EventSelector,
+	state any,
+	event Event,
+	candidates []EventCandidate,
+) (EventDecision, Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if selector == nil {
+		return EventDecision{}, Event{}, ErrNilEventSelector
+	}
+	if len(candidates) == 0 {
+		return EventDecision{}, Event{}, ErrNoEventCandidates
+	}
+
+	byKey := make(map[string]EventCandidate, len(candidates))
+	normalized := make([]EventCandidate, len(candidates))
+	for i, candidate := range candidates {
+		key := strings.TrimSpace(candidate.Key)
+		if key == "" {
+			return EventDecision{}, Event{}, fmt.Errorf("%w: empty key", ErrInvalidEventCandidate)
+		}
+		if _, exists := byKey[key]; exists {
+			return EventDecision{}, Event{}, fmt.Errorf("%w: duplicate key %q", ErrInvalidEventCandidate, key)
+		}
+		candidate.Key = key
+		normalized[i] = candidate
+		byKey[key] = candidate
+	}
+
+	decision, err := selector.SelectEvent(ctx, state, normalized)
+	if err != nil {
+		return EventDecision{}, Event{}, err
+	}
+
+	candidate, ok := byKey[decision.Choice]
+	if !ok {
+		return EventDecision{}, Event{}, fmt.Errorf("%w: %q", ErrUnknownEventChoice, decision.Choice)
+	}
+
+	event.Projection = candidate.Projection
+	decision.Projection = candidate.Projection
+	return decision, event, nil
+}
+
 // DecideAndSubscribe asks selector to choose the event type and assigns the
 // chosen projection to event.
 //
@@ -66,51 +113,22 @@ func (es *EventStore) DecideAndSubscribe(
 	event Event,
 	candidates []EventCandidate,
 ) (EventDecision, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if selector == nil {
-		return EventDecision{}, ErrNilEventSelector
-	}
-	if len(candidates) == 0 {
-		return EventDecision{}, ErrNoEventCandidates
-	}
-
-	byKey := make(map[string]EventCandidate, len(candidates))
-	normalized := make([]EventCandidate, len(candidates))
-	for i, candidate := range candidates {
-		key := strings.TrimSpace(candidate.Key)
-		if key == "" {
-			return EventDecision{}, fmt.Errorf("%w: empty key", ErrInvalidEventCandidate)
-		}
-		if _, exists := byKey[key]; exists {
-			return EventDecision{}, fmt.Errorf("%w: duplicate key %q", ErrInvalidEventCandidate, key)
-		}
-		candidate.Key = key
-		normalized[i] = candidate
-		byKey[key] = candidate
-	}
-
-	decision, err := selector.SelectEvent(ctx, state, normalized)
+	decision, selected, err := selectEvent(ctx, selector, state, event, candidates)
 	if err != nil {
 		return EventDecision{}, err
 	}
-
-	candidate, ok := byKey[decision.Choice]
-	if !ok {
-		return EventDecision{}, fmt.Errorf("%w: %q", ErrUnknownEventChoice, decision.Choice)
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	event.Projection = candidate.Projection
 	if es.hasConfiguredProvider() {
-		if err := es.PublishToProvider(ctx, event); err != nil {
+		if err := es.PublishToProvider(ctx, selected); err != nil {
 			return EventDecision{}, err
 		}
-	} else if err := es.Subscribe(ctx, event); err != nil {
+	} else if err := es.Subscribe(ctx, selected); err != nil {
 		return EventDecision{}, err
 	}
 
-	decision.Projection = candidate.Projection
 	return decision, nil
 }
 

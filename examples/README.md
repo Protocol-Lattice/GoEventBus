@@ -57,6 +57,22 @@ instead of enqueueing it locally.
 
 The example exits without making a request when `OPENROUTER_API_KEY` is not set.
 
+### `transaction_jev`
+
+Uses the same Rules / Cache / Jev selector pipeline inside a transaction.
+`DecideAndPublish` resolves the projection immediately, buffers the selected
+event, and handlers run only when the transaction commits.
+
+```bash
+OPENROUTER_API_KEY=... go run ./examples/transaction_jev
+```
+
+Flow:
+
+```text
+state -> rules/cache/Jev -> selected event -> transaction buffer -> Commit -> handler
+```
+
 ## Core event bus
 
 | Example | Purpose |
@@ -72,6 +88,7 @@ The example exits without making a request when `OPENROUTER_API_KEY` is not set.
 | `fasthttp` | fasthttp integration |
 | `redis` | Redis Streams configured directly on `NewEventStore` |
 | `rabbitmq` | RabbitMQ configured directly on `NewEventStore` |
+| `transaction_jev` | Rules/Cache/Jev event selection buffered until transaction commit |
 
 ## Broker-backed stores
 

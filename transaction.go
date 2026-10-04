@@ -6,14 +6,19 @@ import (
 	"sync/atomic"
 )
 
-// Transaction buffers regular handler events until Commit or Rollback. It is
-// deliberately isolated from the shared ring: the old implementation rewound
-// global queue positions on Rollback and could therefore erase events owned by
-// concurrent producers.
+// Transaction buffers resolved events until Commit or Rollback. Events can be
+// added directly with Publish or selected through an EventSelector with
+// DecideAndPublish. The latter supports RuleCacheSelector, JevSelector, and any
+// custom selector implementing EventSelector.
+//
+// The transaction is deliberately isolated from the shared ring: the old
+// implementation rewound global queue positions on Rollback and could therefore
+// erase events owned by concurrent producers.
 //
 // Commit delivers buffered events synchronously and returns the first handler
 // error. It does not use batch or ordered handlers, matching the historical
-// transaction contract.
+// transaction contract. Event selection happens before buffering; handler side
+// effects remain deferred until Commit.
 type Transaction struct {
 	store    *EventStore
 	commitMu sync.Mutex
@@ -32,6 +37,28 @@ func (tx *Transaction) Publish(e Event) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	tx.events = append(tx.events, e)
+}
+
+// DecideAndPublish asks selector to choose a projection and buffers the
+// resolved event in the transaction. No handler runs until Commit.
+//
+// Selection happens immediately so the caller receives the EventDecision and
+// routing errors before committing. This works with JevSelector,
+// RuleCacheSelector, or any custom EventSelector. Rollback discards the
+// resulting buffered event just like one added with Publish.
+func (tx *Transaction) DecideAndPublish(
+	ctx context.Context,
+	selector EventSelector,
+	state any,
+	event Event,
+	candidates []EventCandidate,
+) (EventDecision, error) {
+	decision, selected, err := selectEvent(ctx, selector, state, event, candidates)
+	if err != nil {
+		return EventDecision{}, err
+	}
+	tx.Publish(selected)
+	return decision, nil
 }
 
 // Commit delivers the events buffered when the call begins. Events appended
