@@ -618,6 +618,10 @@ Broker-backed stores integrate directly with intelligent routing:
 Remote providers require a **string projection** because the projection becomes
 the broker routing name.
 
+The Redis and RabbitMQ snippets below reuse the `selector` and `state` from
+the intelligent-routing section above; only the EventStore transport option
+changes.
+
 ## Redis Streams
 
 ```go
