@@ -679,7 +679,8 @@ if err := tx.Commit(ctx); err != nil {
 <section class="doc-section" id="scheduling" data-doc-section data-search-section data-title="Scheduling" data-category="Operations">
 <p class="doc-section-label mono">Operations</p>
 <h2 tabindex="-1">Scheduling<a class="heading-anchor" href="#scheduling" aria-label="Link to Scheduling">#</a></h2>
-<p>Schedule an event at a time:</p>
+<section class="doc-subsection" id="direct-scheduling" data-search-section data-title="Direct scheduling" data-category="Scheduling"><h3 tabindex="-1">Direct scheduling<a class="heading-anchor" href="#direct-scheduling" aria-label="Link to Direct scheduling">#</a></h3>
+<p>Schedule a known event at a specific time:</p>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">timer := store.Schedule(
     ctx,
     time.Now().Add(10*time.Second),
@@ -691,9 +692,45 @@ if err := tx.Commit(ctx); err != nil {
     30*time.Second,
     event,
 )</code></pre></div>
-<p>The returned <code>*time.Timer</code> may be stopped before it fires.</p>
-<p>Past times and non-positive durations are handled immediately.</p>
-<aside class="doc-note"><strong>Check the timer before stopping it.</strong><p>Past times and non-positive durations execute regular handlers immediately and return <code>nil</code>. Check <code>timer != nil</code> before calling <code>timer.Stop()</code>.</p></aside>
+</section>
+<section class="doc-subsection" id="intelligent-scheduling" data-search-section data-title="Jev-aware scheduling" data-category="Scheduling"><h3 tabindex="-1">Jev-aware scheduling<a class="heading-anchor" href="#intelligent-scheduling" aria-label="Link to Jev-aware scheduling">#</a></h3>
+<p>Use the same Rules / Cache / Jev selector pipeline when the event type must be chosen before scheduling.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">decision, timer, err := store.DecideAndSchedule(
+    ctx,
+    time.Now().Add(10*time.Second),
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   &quot;evt-scheduled-1&quot;,
+        Data: payload,
+    },
+    candidates,
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(&quot;scheduled:&quot;, decision.Choice)</code></pre></div>
+<p>Or after a duration:</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">decision, timer, err := store.DecideAndScheduleAfter(
+    ctx,
+    30*time.Second,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   &quot;evt-scheduled-2&quot;,
+        Data: payload,
+    },
+    candidates,
+)
+if err != nil {
+    log.Fatal(err)
+}</code></pre></div>
+<div class="doc-flow" aria-label="Rules cache Jev decision timer dispatch"><span><small>01</small>Rules / Cache / Jev</span><span><small>02</small>Selected event</span><span><small>03</small>Timer</span><span><small>04</small>Handler</span></div>
+<p>The selector runs when scheduling is requested, not when the timer fires. Selection errors are returned immediately and no timer is created. A successfully scheduled timer therefore contains an already-resolved event.</p>
+<aside class="doc-note"><strong>Scheduling stays local.</strong><p>Even when the EventStore has Redis or RabbitMQ configured, scheduled events follow the existing local <code>Schedule</code> / <code>ScheduleAfter</code> path rather than publishing to the broker.</p></aside>
+</section>
+<p>The returned <code>*time.Timer</code> may be stopped before it fires. Past times and non-positive durations execute immediately and return <code>nil</code>.</p>
 </section>
 <section class="doc-section" id="metrics" data-doc-section data-search-section data-title="Metrics" data-category="Operations">
 <p class="doc-section-label mono">Operations</p>
@@ -762,7 +799,8 @@ type EventSelector interface {
 <tr><td><code>Use</code></td><td>Register middleware</td></tr>
 <tr><td><code>OnBefore</code> / <code>OnAfter</code> / <code>OnError</code></td><td>Register lifecycle hooks</td></tr>
 <tr><td><code>Metrics</code></td><td>Read event counters</td></tr>
-<tr><td><code>Schedule</code> / <code>ScheduleAfter</code></td><td>Schedule future events</td></tr>
+<tr><td><code>Schedule</code> / <code>ScheduleAfter</code></td><td>Schedule known events</td></tr>
+<tr><td><code>DecideAndSchedule</code> / <code>DecideAndScheduleAfter</code></td><td>Select with Rules/Cache/Jev, then schedule the resolved event</td></tr>
 <tr><td><code>BeginTransaction</code></td><td>Start a local transaction buffer; use <code>tx.DecideAndPublish</code> for Rules/Cache/Jev selection</td></tr>
 <tr><td><code>Drain</code> / <code>Close</code></td><td>Stop accepting events and finish in-flight work</td></tr>
 </tbody></table></div>
@@ -777,6 +815,7 @@ type EventSelector interface {
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_cache"><code>routing_cache</code></a></td><td>Reusing a previous decision so the fallback selector is called only once</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_jev"><code>routing_jev</code></a></td><td>Full <code>rules → cache → Jev → GoEventBus</code> routing with OpenRouter</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/transaction_jev"><code>transaction_jev</code></a></td><td>Rules/Cache/Jev event selection buffered until transaction commit</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/schedule_jev"><code>schedule_jev</code></a></td><td>Rules/Cache/Jev event selection before delayed scheduling</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/hello_world"><code>hello_world</code></a></td><td>Minimal direct <code>Subscribe → Publish</code> flow</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/middleware"><code>middleware</code></a></td><td>Handler middleware and lifecycle behavior</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/goroutines-subscribe-publisher"><code>goroutines-subscribe-publisher</code></a></td><td>Concurrent producers and publishing</td></tr>
@@ -790,7 +829,8 @@ type EventSelector interface {
 <div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go run ./examples/routing_rules
 go run ./examples/routing_cache
 OPENROUTER_API_KEY=... go run ./examples/routing_jev
-OPENROUTER_API_KEY=... go run ./examples/transaction_jev</code></pre></div>
+OPENROUTER_API_KEY=... go run ./examples/transaction_jev
+OPENROUTER_API_KEY=... go run ./examples/schedule_jev</code></pre></div>
 <p>See <a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/README.md"><code>examples/README.md</code></a> for a compact guide to all examples.</p>
 </section>
 <section class="doc-section" id="benchmarks" data-doc-section data-search-section data-title="Benchmarks" data-category="Reference">

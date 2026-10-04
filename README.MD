@@ -65,7 +65,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Dead-letter queue** with replay support and panic recovery.
 - **Redis Streams and RabbitMQ EventStore options** for cross-process delivery.
 - **Transactions** with local buffering, synchronous commit, and optional Rules/Cache/Jev event selection.
-- **Scheduling** with absolute and relative timers.
+- **Scheduling** with absolute/relative timers and optional Rules/Cache/Jev event selection.
 - **Metrics** for published, processed, and failed events.
 - **Pluggable decision cache** through the `DecisionCache` interface.
 
@@ -322,6 +322,7 @@ The repository includes runnable examples for both the classic event-bus path an
 | [`routing_cache`](examples/routing_cache) | Reusing a previous decision so the fallback selector is called only once |
 | [`routing_jev`](examples/routing_jev) | Full `rules → cache → Jev → GoEventBus` routing with OpenRouter |
 | [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev event selection buffered until transaction commit |
+| [`schedule_jev`](examples/schedule_jev) | Rules/Cache/Jev event selection before delayed scheduling |
 | [`hello_world`](examples/hello_world) | Minimal direct `Subscribe → Publish` flow |
 | [`middleware`](examples/middleware) | Handler middleware and lifecycle behavior |
 | [`goroutines-subscribe-publisher`](examples/goroutines-subscribe-publisher) | Concurrent producers and publishing |
@@ -340,6 +341,7 @@ go run ./examples/routing_rules
 go run ./examples/routing_cache
 OPENROUTER_API_KEY=... go run ./examples/routing_jev
 OPENROUTER_API_KEY=... go run ./examples/transaction_jev
+OPENROUTER_API_KEY=... go run ./examples/schedule_jev
 ```
 
 See [`examples/README.md`](examples/README.md) for a compact guide to all examples.
@@ -870,7 +872,7 @@ shared EventStore ring.
 
 # Scheduling
 
-Schedule an event at a time:
+Schedule a known event at a specific time:
 
 ```go
 timer := store.Schedule(
@@ -890,9 +892,85 @@ timer := store.ScheduleAfter(
 )
 ```
 
-The returned `*time.Timer` may be stopped before it fires.
+## Intelligent scheduling
 
-Past times and non-positive durations are handled immediately.
+Use the same Rules / Cache / Jev selector pipeline when the event type must be
+chosen before it is scheduled.
+
+Schedule at an absolute time:
+
+```go
+decision, timer, err := store.DecideAndSchedule(
+    ctx,
+    time.Now().Add(10*time.Second),
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   "evt-scheduled-1",
+        Data: payload,
+    },
+    candidates,
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println("scheduled:", decision.Choice)
+```
+
+Or after a duration:
+
+```go
+decision, timer, err := store.DecideAndScheduleAfter(
+    ctx,
+    30*time.Second,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   "evt-scheduled-2",
+        Data: payload,
+    },
+    candidates,
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+The selector is evaluated **when scheduling is requested**, not when the timer
+fires:
+
+```text
+state
+  ↓
+Rules
+  ↓
+Cache
+  ↓
+Jev
+  ↓
+selected event
+  ↓
+timer
+  ↓
+Subscribe → Publish → handler
+```
+
+That means selection errors are returned immediately and no timer is created.
+Once scheduling succeeds, the timer contains an already-resolved event, so a
+later change in rules, cache contents, or Jev output does not change what will
+fire.
+
+`DecideAndSchedule` and `DecideAndScheduleAfter` work with
+`RuleCacheSelector`, `JevSelector`, or any custom `EventSelector`.
+
+The returned `*time.Timer` may be stopped before it fires. Past times and
+non-positive durations preserve the existing immediate-execution behavior and
+return a nil timer.
+
+Scheduling remains a **local EventStore operation**. It does not publish the
+scheduled event to Redis/RabbitMQ even when the parent store has a broker
+configured.
 
 ---
 
@@ -975,7 +1053,8 @@ Important methods:
 | `Use` | Register middleware |
 | `OnBefore` / `OnAfter` / `OnError` | Register lifecycle hooks |
 | `Metrics` | Read event counters |
-| `Schedule` / `ScheduleAfter` | Schedule future events |
+| `Schedule` / `ScheduleAfter` | Schedule known events |
+| `DecideAndSchedule` / `DecideAndScheduleAfter` | Select with Rules/Cache/Jev, then schedule the resolved event |
 | `BeginTransaction` | Start a local transaction buffer; use `tx.DecideAndPublish` for Rules/Cache/Jev selection |
 | `Drain` / `Close` | Stop accepting events and finish in-flight work |
 
