@@ -702,16 +702,18 @@ type EventSelector interface {
     dispatcher *Dispatcher,
     bufferSize uint64,
     policy OverrunPolicy,
+    options ...EventStoreOption,
 ) *EventStore</code></pre></div>
 <p><code>bufferSize</code> must be a non-zero power of two.</p>
 <p>Important methods:</p>
 <div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Method</th><th scope="col">Purpose</th></tr></thead><tbody>
 <tr><td><code>Subscribe</code></td><td>Enqueue a known event</td></tr>
-<tr><td><code>DecideAndSubscribe</code></td><td>Select a candidate event type and enqueue it</td></tr>
+<tr><td><code>DecideAndSubscribe</code></td><td>Select a candidate and enqueue locally or publish to the configured broker</td></tr>
 <tr><td><code>Publish</code></td><td>Dispatch pending events</td></tr>
 <tr><td><code>RegisterOrdered</code></td><td>Preserve FIFO per ordering key</td></tr>
 <tr><td><code>RegisterBatch</code></td><td>Process projection events in chunks</td></tr>
-<tr><td><code>Consume</code></td><td>Feed provider events into the local store</td></tr>
+<tr><td><code>Consume</code></td><td>Feed configured or explicit provider events into the local store</td></tr>
+<tr><td><code>PublishToProvider</code></td><td>Publish a known event through the provider configured on <code>NewEventStore</code></td></tr>
 <tr><td><code>Use</code></td><td>Register middleware</td></tr>
 <tr><td><code>OnBefore</code> / <code>OnAfter</code> / <code>OnError</code></td><td>Register lifecycle hooks</td></tr>
 <tr><td><code>Metrics</code></td><td>Read event counters</td></tr>
