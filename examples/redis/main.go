@@ -54,13 +54,34 @@ func main() {
 		consumeErr <- store.Consume(ctx)
 	}()
 
-	if err := store.PublishToProvider(ctx, bus.Event{
-		ID:         "redis-example-1",
-		Projection: "order.created",
-		Data:       map[string]any{"order_id": "o-42"},
-	}); err != nil {
+	selector := &bus.RuleCacheSelector{
+		Rules: []bus.EventRule{{
+			Name:   "order-created",
+			Choice: "order_created",
+			Match: func(context.Context, any, []bus.EventCandidate) bool {
+				return true
+			},
+		}},
+	}
+
+	decision, err := store.DecideAndSubscribe(
+		ctx,
+		selector,
+		map[string]any{"message": "create order o-42"},
+		bus.Event{
+			ID:   "redis-example-1",
+			Data: map[string]any{"order_id": "o-42"},
+		},
+		[]bus.EventCandidate{{
+			Key:         "order_created",
+			Projection:  "order.created",
+			Description: "A new order should be created",
+		}},
+	)
+	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println("selected:", decision.Choice)
 
 	select {
 	case <-handled:
