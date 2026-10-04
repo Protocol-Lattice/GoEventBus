@@ -146,7 +146,7 @@ GoEventBus can choose an event type before enqueueing it.
 The recommended pipeline is:
 
 ```text
-rules → cache → Jev → cache write → Subscribe → Publish
+rules → cache → Jev → cache write → DecideAndSubscribe → local queue or configured broker
 ```
 
 This keeps the fast path deterministic and only calls Jev when local logic cannot resolve the event type.
@@ -246,7 +246,7 @@ selector := &GoEventBus.RuleCacheSelector{
 }
 ```
 
-Then route and enqueue:
+Then route and deliver:
 
 ```go
 state := map[string]any{
@@ -275,6 +275,15 @@ fmt.Printf(
 
 store.Publish()
 ```
+
+With a normal three-argument `NewEventStore`, `DecideAndSubscribe` enqueues the
+chosen event locally, so call `Publish()` as above.
+
+With `WithRedis(...)`, `WithRabbitMQ(...)`, or `WithProvider(...)`, the
+same `DecideAndSubscribe` call publishes the chosen event directly to the
+configured broker instead. The consumer side runs `store.Consume(ctx)` and
+dispatches broker events through the normal local handlers. Broker-backed
+candidates must use string projections.
 
 If a rule matches, Jev is never called. If the same decision state is already cached, Jev is never called. Only a cache miss reaches the model.
 
@@ -597,9 +606,12 @@ owned by the store. `Drain` / `Close` closes it. The Redis provider still does
 not close an injected Redis client, so shared client ownership remains with the
 application.
 
-Broker-backed stores use two methods:
+Broker-backed stores integrate directly with intelligent routing:
 
-- `PublishToProvider(ctx, event)` sends an event to the configured broker.
+- `DecideAndSubscribe(...)` selects a candidate and publishes it to the
+  configured broker.
+- `PublishToProvider(ctx, event)` is the direct path when the projection is
+  already known and no decision step is needed.
 - `Consume(ctx)` consumes from the configured broker and feeds events through
   the local `Dispatcher`, middleware, hooks, ordering, batching, and DLQ path.
 
@@ -634,13 +646,24 @@ go func() {
     }
 }()
 
-if err := store.PublishToProvider(ctx, GoEventBus.Event{
-    ID:         "evt-redis-1",
-    Projection: "order.created",
-    Data:       order,
-}); err != nil {
+decision, err := store.DecideAndSubscribe(
+    ctx,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   "evt-redis-1",
+        Data: order,
+    },
+    []GoEventBus.EventCandidate{{
+        Key:         "order_created",
+        Projection:  "order.created",
+        Description: "A new order should be created",
+    }},
+)
+if err != nil {
     log.Fatal(err)
 }
+fmt.Println("published decision:", decision.Choice)
 ```
 
 ## RabbitMQ
@@ -667,13 +690,24 @@ go func() {
     }
 }()
 
-if err := store.PublishToProvider(ctx, GoEventBus.Event{
-    ID:         "evt-rabbit-1",
-    Projection: "order.created",
-    Data:       order,
-}); err != nil {
+decision, err := store.DecideAndSubscribe(
+    ctx,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   "evt-rabbit-1",
+        Data: order,
+    },
+    []GoEventBus.EventCandidate{{
+        Key:         "order_created",
+        Projection:  "order.created",
+        Description: "A new order should be created",
+    }},
+)
+if err != nil {
     log.Fatal(err)
 }
+fmt.Println("published decision:", decision.Choice)
 ```
 
 Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when
@@ -861,7 +895,7 @@ Important methods:
 | Method | Purpose |
 |---|---|
 | `Subscribe` | Enqueue a known event |
-| `DecideAndSubscribe` | Select a candidate event type and enqueue it |
+| `DecideAndSubscribe` | Select a candidate and enqueue locally or publish to the configured broker |
 | `Publish` | Dispatch pending events |
 | `RegisterOrdered` | Preserve FIFO per ordering key |
 | `RegisterBatch` | Process projection events in chunks |
