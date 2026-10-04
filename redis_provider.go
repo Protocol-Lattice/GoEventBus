@@ -52,6 +52,14 @@ type RedisProvider struct {
 	closed   atomic.Bool
 }
 
+// WithRedis configures Redis Streams as the EventStore provider. The provider
+// is created lazily on first PublishToProvider or Consume call.
+func WithRedis(config RedisProviderConfig) EventStoreOption {
+	return withProviderFactory(func() (Provider, error) {
+		return NewRedisProvider(config)
+	})
+}
+
 // NewRedisProvider creates a Redis Streams provider. It does not make a Redis
 // request until Publish or Consume is called.
 func NewRedisProvider(config RedisProviderConfig) (*RedisProvider, error) {
