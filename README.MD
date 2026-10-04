@@ -64,7 +64,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
 - **Dead-letter queue** with replay support and panic recovery.
 - **Redis Streams and RabbitMQ EventStore options** for cross-process delivery.
-- **Transactions** with local buffering, synchronous commit, and optional Rules/Cache/Jev event selection.
+- **Transactions** with local buffering, transport-aware commit, and optional Rules/Cache/Jev event selection.
 - **Scheduling** with absolute/relative timers and optional Rules/Cache/Jev event selection.
 - **Metrics** for published, processed, and failed events.
 - **Pluggable decision cache** through the `DecisionCache` interface.
@@ -321,7 +321,7 @@ The repository includes runnable examples for both the classic event-bus path an
 | [`routing_rules`](examples/routing_rules) | Deterministic first-match routing with `EventRule`; no model or cache required |
 | [`routing_cache`](examples/routing_cache) | Reusing a previous decision so the fallback selector is called only once |
 | [`routing_jev`](examples/routing_jev) | Full `rules → cache → Jev → GoEventBus` routing with OpenRouter |
-| [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev event selection buffered until transaction commit |
+| [`transaction_jev`](examples/transaction_jev) | Rules/Cache/Jev selection buffered until commit, then dispatched locally or published through the configured provider |
 | [`schedule_jev`](examples/schedule_jev) | Rules/Cache/Jev event selection before delayed scheduling |
 | [`hello_world`](examples/hello_world) | Minimal direct `Subscribe → Publish` flow |
 | [`middleware`](examples/middleware) | Handler middleware and lifecycle behavior |
@@ -776,7 +776,7 @@ Handler panics are recovered and converted into errors so a single handler canno
 
 # Transactions
 
-Transactions are local event buffers, not database-style atomic transactions.
+Transactions buffer events locally until commit, but commit delivery follows the parent `EventStore` transport. They are not database-style atomic transactions.
 
 Known events can still be buffered directly:
 
