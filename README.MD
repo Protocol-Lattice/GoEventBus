@@ -857,13 +857,17 @@ resolved event. This means:
 - `RuleCacheSelector`, `JevSelector`, and custom `EventSelector`
   implementations all use the same transaction API.
 
-Transactions remain **local** even when the parent `EventStore` has Redis or
-RabbitMQ configured. A transaction commit executes its buffered regular
-handlers synchronously; it does not publish transaction entries to a broker.
+Transaction commit follows the parent `EventStore` transport. With a normal
+local store, `Commit` executes buffered regular handlers synchronously. With
+`WithRedis(...)`, `WithRabbitMQ(...)`, or `WithProvider(...)`, `Commit`
+publishes buffered events to the configured provider instead; local handlers run
+only when those events are consumed back into an `EventStore`.
 
-`Commit` stops at the first handler error. As before, transactions are not
-database-style atomic transactions: side effects from handlers that already ran
-cannot be undone.
+Local `Commit` stops at the first handler error. Broker-backed `Commit` stops at
+the first publish error and removes only the prefix already confirmed by the
+provider, so retrying starts from the first unpublished event. Transactions are
+still not database-style atomic transactions: handler side effects or broker
+publishes that already succeeded cannot be undone.
 
 `Rollback` only discards events still buffered locally and never rewinds the
 shared EventStore ring.
@@ -1055,7 +1059,7 @@ Important methods:
 | `Metrics` | Read event counters |
 | `Schedule` / `ScheduleAfter` | Schedule known events |
 | `DecideAndSchedule` / `DecideAndScheduleAfter` | Select with Rules/Cache/Jev, then schedule the resolved event |
-| `BeginTransaction` | Start a local transaction buffer; use `tx.DecideAndPublish` for Rules/Cache/Jev selection |
+| `BeginTransaction` | Buffer events for commit; local stores execute handlers, provider-backed stores publish to the broker |
 | `Drain` / `Close` | Stop accepting events and finish in-flight work |
 
 ---
