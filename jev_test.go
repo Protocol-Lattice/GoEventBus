@@ -85,6 +85,56 @@ func TestEventStore_DecideAndSubscribeRoutesTypedProjection(t *testing.T) {
 	}
 }
 
+func TestEventStore_DecideAndSubscribePublishesToConfiguredProvider(t *testing.T) {
+	dispatcher := Dispatcher{}
+	localCalls := 0
+	dispatcher.Register("order.created", func(context.Context, Event) (Result, error) {
+		localCalls++
+		return Result{}, nil
+	})
+
+	provider := &testProvider{}
+	store := NewEventStore(&dispatcher, 8, DropOldest, WithProvider(provider))
+	t.Cleanup(func() { _ = store.Close(context.Background()) })
+
+	selector := eventSelectorFunc(func(
+		context.Context,
+		any,
+		[]EventCandidate,
+	) (EventDecision, error) {
+		return EventDecision{Choice: "order_created", Confidence: 0.95}, nil
+	})
+
+	decision, err := store.DecideAndSubscribe(
+		context.Background(),
+		selector,
+		map[string]any{"message": "create order 42"},
+		Event{ID: "evt-provider", Data: map[string]any{"order_id": "o-42"}},
+		[]EventCandidate{{
+			Key:         "order_created",
+			Projection:  "order.created",
+			Description: "Create an order",
+		}},
+	)
+	if err != nil {
+		t.Fatalf("DecideAndSubscribe: %v", err)
+	}
+	if decision.Projection != "order.created" {
+		t.Fatalf("decision projection = %#v, want order.created", decision.Projection)
+	}
+	if provider.published.ID != "evt-provider" {
+		t.Fatalf("published event ID = %q, want evt-provider", provider.published.ID)
+	}
+	if provider.published.Projection != "order.created" {
+		t.Fatalf("published projection = %#v, want order.created", provider.published.Projection)
+	}
+
+	store.Publish()
+	if localCalls != 0 {
+		t.Fatalf("local handler calls = %d, want 0 before provider consumption", localCalls)
+	}
+}
+
 func TestEventStore_DecideAndSubscribeRejectsUnknownChoice(t *testing.T) {
 	dispatcher := Dispatcher{}
 	store := NewEventStore(&dispatcher, 8, DropOldest)
