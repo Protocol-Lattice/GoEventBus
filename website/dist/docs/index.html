@@ -610,6 +610,7 @@ fmt.Println(&quot;published decision:&quot;, decision.Choice)</code></pre></div>
 <p class="doc-section-label mono">Operations</p>
 <h2 tabindex="-1">Transactions<a class="heading-anchor" href="#transactions" aria-label="Link to Transactions">#</a></h2>
 <p>Transactions are local event buffers, not database-style atomic transactions.</p>
+<section class="doc-subsection" id="direct-transactions" data-search-section data-title="Direct transactions" data-category="Transactions"><h3 tabindex="-1">Direct transactions<a class="heading-anchor" href="#direct-transactions" aria-label="Link to Direct transactions">#</a></h3>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">tx := store.BeginTransaction()
 
 tx.Publish(GoEventBus.Event{
@@ -628,8 +629,52 @@ if err := tx.Commit(ctx); err != nil {
     tx.Rollback()
     log.Fatal(err)
 }</code></pre></div>
-<p><code>Commit</code> executes buffered regular handlers synchronously and stops at the first error.</p>
-<p><code>Rollback</code> only discards events still buffered locally. It cannot undo side effects from handlers that already ran.</p>
+</section>
+<section class="doc-subsection" id="intelligent-transactions" data-search-section data-title="Jev-aware transactions" data-category="Transactions"><h3 tabindex="-1">Jev-aware transactions<a class="heading-anchor" href="#intelligent-transactions" aria-label="Link to Jev-aware transactions">#</a></h3>
+<p>Use <code>DecideAndPublish</code> when a transaction entry needs the same Rules / Cache / Jev selection pipeline as <code>DecideAndSubscribe</code>.</p>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">tx := store.BeginTransaction()
+
+decision, err := tx.DecideAndPublish(
+    ctx,
+    selector,
+    map[string]any{
+        &quot;message&quot;: &quot;Create an invoice for order 42&quot;,
+    },
+    GoEventBus.Event{
+        ID:   &quot;evt-3&quot;,
+        Data: invoice,
+    },
+    []GoEventBus.EventCandidate{
+        {
+            Key:         &quot;order_created&quot;,
+            Projection:  &quot;order.created&quot;,
+            Description: &quot;A new order should be created&quot;,
+        },
+        {
+            Key:         &quot;invoice_created&quot;,
+            Projection:  &quot;invoice.created&quot;,
+            Description: &quot;An invoice should be created&quot;,
+        },
+    },
+)
+if err != nil {
+    tx.Rollback()
+    log.Fatal(err)
+}
+
+fmt.Println(&quot;selected:&quot;, decision.Choice)
+
+// No handler has run yet.
+if err := tx.Commit(ctx); err != nil {
+    tx.Rollback()
+    log.Fatal(err)
+}</code></pre></div>
+<div class="doc-flow" aria-label="Rules cache Jev decision transaction commit"><span><small>01</small>Rules / Cache / Jev</span><span><small>02</small>DecideAndPublish</span><span><small>03</small>Transaction buffer</span><span><small>04</small>Commit</span></div>
+<p><code>DecideAndPublish</code> resolves the event projection immediately and buffers only the selected event. Routing failures do not mutate the transaction, and <code>Rollback</code> discards intelligently selected events just like direct events.</p>
+<aside class="doc-note"><strong>Transactions stay local.</strong><p>Even when the parent EventStore has Redis or RabbitMQ configured, transaction commits execute buffered regular handlers synchronously. They do not publish transaction entries to the broker.</p></aside>
+</section>
+<p><code>Commit</code> stops at the first handler error. Transactions are not database-style atomic transactions, so handler side effects that already ran cannot be undone.</p>
+<p><code>Rollback</code> discards only events still buffered locally and never rewinds the shared EventStore ring.</p>
 </section>
 <section class="doc-section" id="scheduling" data-doc-section data-search-section data-title="Scheduling" data-category="Operations">
 <p class="doc-section-label mono">Operations</p>
@@ -718,7 +763,7 @@ type EventSelector interface {
 <tr><td><code>OnBefore</code> / <code>OnAfter</code> / <code>OnError</code></td><td>Register lifecycle hooks</td></tr>
 <tr><td><code>Metrics</code></td><td>Read event counters</td></tr>
 <tr><td><code>Schedule</code> / <code>ScheduleAfter</code></td><td>Schedule future events</td></tr>
-<tr><td><code>BeginTransaction</code></td><td>Start a local transaction buffer</td></tr>
+<tr><td><code>BeginTransaction</code></td><td>Start a local transaction buffer; use <code>tx.DecideAndPublish</code> for Rules/Cache/Jev selection</td></tr>
 <tr><td><code>Drain</code> / <code>Close</code></td><td>Stop accepting events and finish in-flight work</td></tr>
 </tbody></table></div>
 </section>
@@ -731,6 +776,7 @@ type EventSelector interface {
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_rules"><code>routing_rules</code></a></td><td>Deterministic first-match routing with <code>EventRule</code>; no model or cache required</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_cache"><code>routing_cache</code></a></td><td>Reusing a previous decision so the fallback selector is called only once</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/routing_jev"><code>routing_jev</code></a></td><td>Full <code>rules → cache → Jev → GoEventBus</code> routing with OpenRouter</td></tr>
+<tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/transaction_jev"><code>transaction_jev</code></a></td><td>Rules/Cache/Jev event selection buffered until transaction commit</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/hello_world"><code>hello_world</code></a></td><td>Minimal direct <code>Subscribe → Publish</code> flow</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/middleware"><code>middleware</code></a></td><td>Handler middleware and lifecycle behavior</td></tr>
 <tr><td><a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/goroutines-subscribe-publisher"><code>goroutines-subscribe-publisher</code></a></td><td>Concurrent producers and publishing</td></tr>
@@ -743,7 +789,8 @@ type EventSelector interface {
 <p>Run the new routing examples directly:</p>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Terminal</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Terminal example"><code data-language="bash">go run ./examples/routing_rules
 go run ./examples/routing_cache
-OPENROUTER_API_KEY=... go run ./examples/routing_jev</code></pre></div>
+OPENROUTER_API_KEY=... go run ./examples/routing_jev
+OPENROUTER_API_KEY=... go run ./examples/transaction_jev</code></pre></div>
 <p>See <a href="https://github.com/Protocol-Lattice/GoEventBus/tree/main/examples/README.md"><code>examples/README.md</code></a> for a compact guide to all examples.</p>
 </section>
 <section class="doc-section" id="benchmarks" data-doc-section data-search-section data-title="Benchmarks" data-category="Reference">
