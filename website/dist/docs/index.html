@@ -369,7 +369,7 @@ if err := store.Drain(ctx); err != nil {
 <h2 tabindex="-1">Rules, cache &amp; Jev<a class="heading-anchor" href="#intelligent-event-routing" aria-label="Link to Rules, cache &amp; Jev">#</a></h2>
 <p>GoEventBus can choose an event type before enqueueing it.</p>
 <p>The recommended pipeline is:</p>
-<div class="doc-code"><div class="doc-code-toolbar"><span>Flow</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Flow example"><code data-language="text">rules → cache → Jev → cache write → Subscribe → Publish</code></pre></div>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Flow</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Flow example"><code data-language="text">rules → cache → Jev → cache write → DecideAndSubscribe → local queue or configured broker</code></pre></div>
 <p>This keeps the fast path deterministic and only calls Jev when local logic cannot resolve the event type.</p>
 <section class="doc-subsection" id="1-define-candidates" data-search-section data-title="1. Define candidates" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">1. Define candidates<a class="heading-anchor" href="#1-define-candidates" aria-label="Link to 1. Define candidates">#</a></h3>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type HouseWasSold struct{}
@@ -438,7 +438,7 @@ candidates := []GoEventBus.EventCandidate{
     Cache:    cache,
     Fallback: jev,
 }</code></pre></div>
-<p>Then route and enqueue:</p>
+<p>Then route and deliver:</p>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">state := map[string]any{
     &quot;message&quot;: &quot;The property at 1 Main St was sold for $500000&quot;,
 }
@@ -464,7 +464,7 @@ fmt.Printf(
 )
 
 store.Publish()</code></pre></div>
-<p>If a rule matches, Jev is never called. If the same decision state is already cached, Jev is never called. Only a cache miss reaches the model.</p>
+<p>With a normal three-argument <code>NewEventStore</code>, <code>DecideAndSubscribe</code> enqueues locally and <code>Publish()</code> dispatches the event. With <code>WithRedis(...)</code> or <code>WithRabbitMQ(...)</code>, the same call publishes the selected event to the configured broker instead.</p>\n<p>If a rule matches, Jev is never called. If the same decision state is already cached, Jev is never called. Only a cache miss reaches the model.</p>
 </section>
 <section class="doc-subsection" id="cache-behavior" data-search-section data-title="Cache behavior" data-category="Rules, cache &amp; Jev"><h3 tabindex="-1">Cache behavior<a class="heading-anchor" href="#cache-behavior" aria-label="Link to Cache behavior">#</a></h3>
 <p><code>DecisionCache</code> is intentionally small:</p>
@@ -482,57 +482,107 @@ store.Publish()</code></pre></div>
 <section class="doc-section" id="external-providers" data-doc-section data-search-section data-title="Redis &amp; RabbitMQ" data-category="Routing &amp; integrations">
 <p class="doc-section-label mono">Routing &amp; integrations</p>
 <h2 tabindex="-1">Redis &amp; RabbitMQ<a class="heading-anchor" href="#external-providers" aria-label="Link to Redis &amp; RabbitMQ">#</a></h2>
-<p>The local <code>EventStore</code> remains the execution engine. Providers move events between processes.</p>
-<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">type Provider interface {
-    Publish(context.Context, Event) error
-    Consume(context.Context, EventConsumer) error
-    Close() error
-}</code></pre></div>
-<p>Built-in providers:</p>
-<ul>
-<li><strong>Redis Streams</strong></li>
-<li><strong>RabbitMQ</strong></li>
-</ul>
-<p>Remote providers require a <strong>string projection</strong> because the projection becomes a stable broker routing name.</p>
+<p>Redis Streams and RabbitMQ are configured directly on <code>NewEventStore</code>. The store owns the provider lifecycle, and broker construction is lazy until the first publish or consume operation.</p>
+<p>When a broker is configured, <code>DecideAndSubscribe</code> selects the event type and publishes the selected event to that broker. Without a broker option, the same method keeps its normal local enqueue behavior.</p>
+<aside class="doc-note"><strong>Broker projections must be strings.</strong><p>Redis Streams and RabbitMQ use the selected projection as the broker routing name, so broker-backed candidates must use string projections.</p></aside>
 <section class="doc-subsection" id="redis-streams" data-search-section data-title="Redis Streams" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">Redis Streams<a class="heading-anchor" href="#redis-streams" aria-label="Link to Redis Streams">#</a></h3>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">rdb := redis.NewClient(&amp;redis.Options{
     Addr: &quot;localhost:6379&quot;,
 })
 
-provider, err := GoEventBus.NewRedisProvider(
-    GoEventBus.RedisProviderConfig{
+store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRedis(GoEventBus.RedisProviderConfig{
         Client:   rdb,
         Stream:   &quot;events&quot;,
         Group:    &quot;billing&quot;,
         Consumer: &quot;billing-1&quot;,
+        StartID:  &quot;0&quot;,
+    }),
+)
+defer store.Close(context.Background())
+
+go func() {
+    if err := store.Consume(ctx); err != nil &amp;&amp;
+        !errors.Is(err, context.Canceled) &amp;&amp;
+        !errors.Is(err, GoEventBus.ErrProviderClosed) {
+        log.Println(err)
+    }
+}()
+
+brokerCandidates := []GoEventBus.EventCandidate{
+    {
+        Key:         &quot;order_created&quot;,
+        Projection:  &quot;order.created&quot;,
+        Description: &quot;A new order should be created&quot;,
     },
+}
+
+decision, err := store.DecideAndSubscribe(
+    ctx,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   &quot;evt-redis-1&quot;,
+        Data: order,
+    },
+    brokerCandidates,
 )
 if err != nil {
     log.Fatal(err)
 }
-defer provider.Close()
 
-go func() {
-    if err := store.Consume(ctx, provider); err != nil &amp;&amp;
-        !errors.Is(err, context.Canceled) {
-        log.Println(err)
-    }
-}()</code></pre></div>
+fmt.Println(&quot;published decision:&quot;, decision.Choice)</code></pre></div>
+<p>If the projection is already known and no decision step is needed, use <code>store.PublishToProvider(ctx, event)</code> instead.</p>
 </section>
 <section class="doc-subsection" id="rabbitmq" data-search-section data-title="RabbitMQ" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">RabbitMQ<a class="heading-anchor" href="#rabbitmq" aria-label="Link to RabbitMQ">#</a></h3>
-<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">provider, err := GoEventBus.NewRabbitMQProvider(
-    GoEventBus.RabbitMQProviderConfig{
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRabbitMQ(GoEventBus.RabbitMQProviderConfig{
         URL:        &quot;amqp://guest:guest@localhost:5672/&quot;,
         Exchange:   &quot;events&quot;,
         Queue:      &quot;billing&quot;,
         BindingKey: &quot;order.*&quot;,
         Consumer:   &quot;billing-1&quot;,
+    }),
+)
+defer store.Close(context.Background())
+
+go func() {
+    if err := store.Consume(ctx); err != nil &amp;&amp;
+        !errors.Is(err, context.Canceled) &amp;&amp;
+        !errors.Is(err, GoEventBus.ErrProviderClosed) {
+        log.Println(err)
+    }
+}()
+
+brokerCandidates := []GoEventBus.EventCandidate{
+    {
+        Key:         &quot;order_created&quot;,
+        Projection:  &quot;order.created&quot;,
+        Description: &quot;A new order should be created&quot;,
     },
+}
+
+decision, err := store.DecideAndSubscribe(
+    ctx,
+    selector,
+    state,
+    GoEventBus.Event{
+        ID:   &quot;evt-rabbit-1&quot;,
+        Data: order,
+    },
+    brokerCandidates,
 )
 if err != nil {
     log.Fatal(err)
 }
-defer provider.Close()</code></pre></div>
+
+fmt.Println(&quot;published decision:&quot;, decision.Choice)</code></pre></div>
 <p>Providers use <code>JSONCodec</code> by default. Supply a custom <code>DecodePayload</code> when consumers need concrete payload types rather than generic JSON values.</p>
 </section>
 </section>
@@ -652,16 +702,18 @@ type EventSelector interface {
     dispatcher *Dispatcher,
     bufferSize uint64,
     policy OverrunPolicy,
+    options ...EventStoreOption,
 ) *EventStore</code></pre></div>
 <p><code>bufferSize</code> must be a non-zero power of two.</p>
 <p>Important methods:</p>
 <div class="doc-table" role="region" aria-label="Reference table" tabindex="0"><table><thead><tr><th scope="col">Method</th><th scope="col">Purpose</th></tr></thead><tbody>
 <tr><td><code>Subscribe</code></td><td>Enqueue a known event</td></tr>
-<tr><td><code>DecideAndSubscribe</code></td><td>Select a candidate event type and enqueue it</td></tr>
+<tr><td><code>DecideAndSubscribe</code></td><td>Select a candidate and enqueue locally or publish to the configured broker</td></tr>
 <tr><td><code>Publish</code></td><td>Dispatch pending events</td></tr>
 <tr><td><code>RegisterOrdered</code></td><td>Preserve FIFO per ordering key</td></tr>
 <tr><td><code>RegisterBatch</code></td><td>Process projection events in chunks</td></tr>
-<tr><td><code>Consume</code></td><td>Feed provider events into the local store</td></tr>
+<tr><td><code>Consume</code></td><td>Feed configured or explicit provider events into the local store</td></tr>
+<tr><td><code>PublishToProvider</code></td><td>Publish a known event through the provider configured on <code>NewEventStore</code></td></tr>
 <tr><td><code>Use</code></td><td>Register middleware</td></tr>
 <tr><td><code>OnBefore</code> / <code>OnAfter</code> / <code>OnError</code></td><td>Register lifecycle hooks</td></tr>
 <tr><td><code>Metrics</code></td><td>Read event counters</td></tr>

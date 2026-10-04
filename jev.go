@@ -51,9 +51,14 @@ type EventSelector interface {
 	SelectEvent(context.Context, any, []EventCandidate) (EventDecision, error)
 }
 
-// DecideAndSubscribe asks selector to choose the event type, assigns the chosen
-// projection to event, and enqueues it. Dispatch still follows the normal
-// Subscribe -> Publish lifecycle.
+// DecideAndSubscribe asks selector to choose the event type and assigns the
+// chosen projection to event.
+//
+// Without a configured provider, the event is enqueued locally and dispatch
+// follows the normal Subscribe -> Publish lifecycle. With WithRedis,
+// WithRabbitMQ, or WithProvider, the selected event is published directly to
+// the configured provider instead. A consumer can feed it back into an
+// EventStore with Consume.
 func (es *EventStore) DecideAndSubscribe(
 	ctx context.Context,
 	selector EventSelector,
@@ -97,7 +102,11 @@ func (es *EventStore) DecideAndSubscribe(
 	}
 
 	event.Projection = candidate.Projection
-	if err := es.Subscribe(ctx, event); err != nil {
+	if es.hasConfiguredProvider() {
+		if err := es.PublishToProvider(ctx, event); err != nil {
+			return EventDecision{}, err
+		}
+	} else if err := es.Subscribe(ctx, event); err != nil {
 		return EventDecision{}, err
 	}
 

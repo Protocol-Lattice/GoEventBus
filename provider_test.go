@@ -111,18 +111,75 @@ func TestEventStoreConsumeRejectsNilProvider(t *testing.T) {
 	}
 }
 
-type testProvider struct {
-	event    Event
-	consumed bool
+
+func TestEventStoreConfiguredProvider(t *testing.T) {
+	dispatcher := Dispatcher{}
+	called := 0
+	dispatcher.Register("remote", func(_ context.Context, event Event) (Result, error) {
+		if event.ID != "remote-1" {
+			t.Fatalf("event ID = %q, want remote-1", event.ID)
+		}
+		called++
+		return Result{}, nil
+	})
+
+	provider := &testProvider{event: Event{ID: "remote-1", Projection: "remote"}}
+	store := NewEventStore(&dispatcher, 8, DropOldest, WithProvider(provider))
+
+	if err := store.Consume(context.Background()); err != nil {
+		t.Fatalf("Consume configured provider: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("handler calls = %d, want 1", called)
+	}
+
+	outbound := Event{ID: "outbound-1", Projection: "remote"}
+	if err := store.PublishToProvider(context.Background(), outbound); err != nil {
+		t.Fatalf("PublishToProvider: %v", err)
+	}
+	if provider.published.ID != outbound.ID {
+		t.Fatalf("published event ID = %q, want %q", provider.published.ID, outbound.ID)
+	}
+
+	if err := store.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !provider.closed {
+		t.Fatal("configured provider was not closed with the store")
+	}
 }
 
-func (p *testProvider) Publish(context.Context, Event) error { return nil }
+func TestEventStoreProviderOperationsRequireOption(t *testing.T) {
+	store := NewEventStore(&Dispatcher{}, 8, DropOldest)
+
+	if err := store.Consume(context.Background()); !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("Consume error = %v, want ErrNoProvider", err)
+	}
+	if err := store.PublishToProvider(context.Background(), Event{Projection: "remote"}); !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("PublishToProvider error = %v, want ErrNoProvider", err)
+	}
+}
+
+type testProvider struct {
+	event     Event
+	published Event
+	consumed  bool
+	closed    bool
+}
+
+func (p *testProvider) Publish(_ context.Context, event Event) error {
+	p.published = event
+	return nil
+}
 
 func (p *testProvider) Consume(ctx context.Context, consumer EventConsumer) error {
 	p.consumed = true
 	return consumer(ctx, p.event)
 }
 
-func (p *testProvider) Close() error { return nil }
+func (p *testProvider) Close() error {
+	p.closed = true
+	return nil
+}
 
 var _ Provider = (*testProvider)(nil)

@@ -40,25 +40,29 @@ func TestRedisProviderIntegration(t *testing.T) {
 
 	stream := "goeventbus:integration:redis"
 	group := "goeventbus-integration"
-	provider, err := NewRedisProvider(RedisProviderConfig{
-		Client:   client,
-		Stream:   stream,
-		Group:    group,
-		Consumer: "consumer-1",
-		Block:    100 * time.Millisecond,
-		Count:    1,
+	delivered := make(chan Event, 2)
+	dispatcher := Dispatcher{}
+	dispatcher.Register("orders.created", func(_ context.Context, event Event) (Result, error) {
+		delivered <- event
+		return Result{}, nil
 	})
-	if err != nil {
-		t.Fatalf("create Redis provider: %v", err)
-	}
-	t.Cleanup(func() { _ = provider.Close() })
 
-	want := Event{
-		ID:         "redis-1",
-		Projection: "orders.created",
-		Data:       map[string]any{"order_id": "o-42"},
-	}
-	delivered, consumeErr := consumeProvider(t, ctx, provider)
+	store := NewEventStore(
+		&dispatcher,
+		8,
+		DropOldest,
+		WithRedis(RedisProviderConfig{
+			Client:   client,
+			Stream:   stream,
+			Group:    group,
+			Consumer: "consumer-1",
+			StartID:  "0",
+			Block:    100 * time.Millisecond,
+			Count:    1,
+		}),
+	)
+	consumeErr := runStoreConsumer(t, ctx, store)
+
 	waitFor(t, ctx, "Redis consumer group", func() (bool, error) {
 		groups, err := client.XInfoGroups(ctx, stream).Result()
 		if err != nil {
@@ -71,8 +75,28 @@ func TestRedisProviderIntegration(t *testing.T) {
 		}
 		return false, nil
 	})
-	if err := provider.Publish(ctx, want); err != nil {
-		t.Fatalf("publish Redis event: %v", err)
+
+	want := Event{
+		ID:         "redis-1",
+		Projection: "orders.created",
+		Data:       map[string]any{"order_id": "o-42"},
+	}
+	decision, err := store.DecideAndSubscribe(
+		ctx,
+		fixedEventSelector("order_created"),
+		map[string]any{"message": "create order o-42"},
+		Event{ID: want.ID, Data: want.Data},
+		[]EventCandidate{{
+			Key:         "order_created",
+			Projection:  want.Projection,
+			Description: "A new order should be created",
+		}},
+	)
+	if err != nil {
+		t.Fatalf("DecideAndSubscribe Redis event: %v", err)
+	}
+	if decision.Projection != want.Projection {
+		t.Fatalf("decision projection = %#v, want %#v", decision.Projection, want.Projection)
 	}
 
 	assertDeliveredEvent(t, receiveEvent(t, ctx, delivered, consumeErr), want)
@@ -112,33 +136,71 @@ func TestRabbitMQProviderIntegration(t *testing.T) {
 		t.Fatalf("get RabbitMQ endpoint: %v", err)
 	}
 	url := fmt.Sprintf("amqp://goeventbus:goeventbus@%s/", endpoint)
-	provider, err := NewRabbitMQProvider(RabbitMQProviderConfig{
-		URL:           url,
-		Exchange:      "goeventbus.integration",
-		Queue:         "goeventbus.integration.queue",
-		BindingKey:    "orders.*",
-		Consumer:      "consumer-1",
-		PrefetchCount: 1,
+
+	delivered := make(chan Event, 2)
+	dispatcher := Dispatcher{}
+	dispatcher.Register("orders.created", func(_ context.Context, event Event) (Result, error) {
+		delivered <- event
+		return Result{}, nil
 	})
-	if err != nil {
-		t.Fatalf("create RabbitMQ provider: %v", err)
-	}
-	t.Cleanup(func() { _ = provider.Close() })
+
+	store := NewEventStore(
+		&dispatcher,
+		8,
+		DropOldest,
+		WithRabbitMQ(RabbitMQProviderConfig{
+			URL:           url,
+			Exchange:      "goeventbus.integration",
+			Queue:         "goeventbus.integration.queue",
+			BindingKey:    "orders.*",
+			Consumer:      "consumer-1",
+			PrefetchCount: 1,
+		}),
+	)
+	consumeErr := runStoreConsumer(t, ctx, store)
 
 	want := []Event{
 		{ID: "rabbit-1", Projection: "orders.created", Data: map[string]any{"order_id": "o-42"}},
 		{ID: "rabbit-2", Projection: "orders.created", Data: map[string]any{"order_id": "o-43"}},
 	}
 	for _, event := range want {
-		if err := provider.Publish(ctx, event); err != nil {
-			t.Fatalf("publish RabbitMQ event %q: %v", event.ID, err)
+		decision, err := store.DecideAndSubscribe(
+			ctx,
+			fixedEventSelector("order_created"),
+			map[string]any{"message": "create " + event.ID},
+			Event{ID: event.ID, Data: event.Data},
+			[]EventCandidate{{
+				Key:         "order_created",
+				Projection:  event.Projection,
+				Description: "A new order should be created",
+			}},
+		)
+		if err != nil {
+			t.Fatalf("DecideAndSubscribe RabbitMQ event %q: %v", event.ID, err)
+		}
+		if decision.Projection != event.Projection {
+			t.Fatalf("decision projection = %#v, want %#v", decision.Projection, event.Projection)
 		}
 	}
 
-	delivered, consumeErr := consumeProvider(t, ctx, provider)
 	for _, event := range want {
 		assertDeliveredEvent(t, receiveEvent(t, ctx, delivered, consumeErr), event)
 	}
+}
+
+type fixedEventSelector string
+
+func (s fixedEventSelector) SelectEvent(
+	context.Context,
+	any,
+	[]EventCandidate,
+) (EventDecision, error) {
+	choice := string(s)
+	return EventDecision{
+		Choice:        choice,
+		Confidence:    1,
+		Probabilities: map[string]float64{choice: 1},
+	}, nil
 }
 
 func integrationContext(t *testing.T) context.Context {
@@ -148,39 +210,28 @@ func integrationContext(t *testing.T) context.Context {
 	return ctx
 }
 
-func consumeProvider(t *testing.T, parent context.Context, provider Provider) (<-chan Event, <-chan error) {
+func runStoreConsumer(t *testing.T, parent context.Context, store *EventStore) <-chan error {
 	t.Helper()
 	ctx, cancel := context.WithCancel(parent)
-	delivered := make(chan Event, 2)
 	consumeErr := make(chan error, 1)
 	go func() {
-		consumeErr <- provider.Consume(ctx, func(_ context.Context, event Event) error {
-			delivered <- event
-			return nil
-		})
+		consumeErr <- store.Consume(ctx)
 	}()
 	t.Cleanup(func() {
 		cancel()
+		_ = store.Close(context.Background())
 		select {
 		case err := <-consumeErr:
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrProviderClosed) {
+			if !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, context.DeadlineExceeded) &&
+				!errors.Is(err, ErrProviderClosed) {
 				t.Errorf("Consume returned %v after shutdown", err)
 			}
-			return
-		case <-time.After(time.Second):
-		}
-
-		_ = provider.Close()
-		select {
-		case err := <-consumeErr:
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrProviderClosed) {
-				t.Errorf("Consume returned %v after forced shutdown", err)
-			}
 		case <-time.After(5 * time.Second):
-			t.Error("Consume did not stop after forced shutdown")
+			t.Error("Consume did not stop after shutdown")
 		}
 	})
-	return delivered, consumeErr
+	return consumeErr
 }
 
 func receiveEvent(t *testing.T, ctx context.Context, delivered <-chan Event, consumeErr <-chan error) Event {

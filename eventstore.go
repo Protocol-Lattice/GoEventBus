@@ -160,6 +160,12 @@ type EventStore struct {
 	shutdownOnce      sync.Once
 	shutdownDone      chan struct{}
 	closed            atomic.Bool
+	shutdownErr       error
+
+	// Optional external provider configured through NewEventStore options.
+	providerMu      sync.Mutex
+	provider        Provider
+	providerFactory func() (Provider, error)
 
 	// Counters
 	publishedCount uint64
@@ -171,7 +177,10 @@ type EventStore struct {
 }
 
 // NewEventStore initializes a new EventStore. It spins up a default worker pool.
-func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy) *EventStore {
+//
+// Optional integrations such as Redis Streams and RabbitMQ can be attached with
+// EventStoreOption values while the original three-argument API remains valid.
+func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPolicy, options ...EventStoreOption) *EventStore {
 	if dispatcher == nil {
 		panic("GoEventBus: dispatcher must not be nil")
 	}
@@ -191,6 +200,17 @@ func NewEventStore(dispatcher *Dispatcher, bufferSize uint64, policy OverrunPoli
 	}
 	for i := range es.slots {
 		es.slots[i].sequence.Store(uint64(i) * 2)
+	}
+	for _, option := range options {
+		if option == nil {
+			panic("GoEventBus: EventStore option must not be nil")
+		}
+		if err := option(es); err != nil {
+			if es.provider != nil {
+				_ = es.provider.Close()
+			}
+			panic(fmt.Sprintf("GoEventBus: configure EventStore: %v", err))
+		}
 	}
 	// start worker pool
 	for i := 0; i < es.asyncWorkers; i++ {
@@ -614,6 +634,7 @@ func (es *EventStore) beginShutdown() {
 	es.lifecycleMu.Unlock()
 
 	es.activeOps.Wait()
+	es.shutdownErr = es.closeConfiguredProvider()
 	if es.Async && len(es.orderedHandlers) > 0 {
 		events, orderedWork := es.takeAndQueueOrdered()
 		es.submitOrdered(orderedWork)
@@ -640,7 +661,7 @@ func (es *EventStore) Drain(ctx context.Context) error {
 	})
 	select {
 	case <-es.shutdownDone:
-		return nil
+		return es.shutdownErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}

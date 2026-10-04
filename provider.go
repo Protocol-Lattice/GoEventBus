@@ -8,8 +8,18 @@ import (
 )
 
 var (
-	// ErrNilProvider is returned when EventStore.Consume receives no provider.
+	// ErrNilProvider is returned when EventStore.Consume receives an explicit nil provider
+	// or WithProvider is configured with nil.
 	ErrNilProvider = errors.New("goeventbus: provider must not be nil")
+	// ErrNoProvider is returned when a provider-backed store operation is used
+	// without configuring a provider option.
+	ErrNoProvider = errors.New("goeventbus: no provider configured")
+	// ErrProviderAlreadyConfigured is returned when more than one provider option
+	// is supplied to NewEventStore.
+	ErrProviderAlreadyConfigured = errors.New("goeventbus: provider already configured")
+	// ErrTooManyProviders is returned when Consume is called with more than one
+	// explicit provider. Pass no provider to use the NewEventStore option.
+	ErrTooManyProviders = errors.New("goeventbus: Consume accepts at most one provider")
 	// ErrNilConsumer is returned when a provider is asked to consume without a callback.
 	ErrNilConsumer = errors.New("goeventbus: consumer must not be nil")
 	// ErrProviderClosed is returned after a provider has been closed.
@@ -30,6 +40,115 @@ type Provider interface {
 	Publish(context.Context, Event) error
 	Consume(context.Context, EventConsumer) error
 	Close() error
+}
+
+// EventStoreOption configures optional EventStore integrations.
+//
+// Provider options are intentionally variadic on NewEventStore so existing
+// three-argument construction remains source-compatible.
+type EventStoreOption func(*EventStore) error
+
+// WithProvider attaches an already-created provider to the EventStore. The
+// store owns the provider and closes it during Drain/Close.
+//
+// Prefer WithRedis or WithRabbitMQ when the provider should be constructed
+// lazily from its config on first use.
+func WithProvider(provider Provider) EventStoreOption {
+	return func(es *EventStore) error {
+		if provider == nil {
+			return ErrNilProvider
+		}
+		es.providerMu.Lock()
+		defer es.providerMu.Unlock()
+		if es.provider != nil || es.providerFactory != nil {
+			return ErrProviderAlreadyConfigured
+		}
+		es.provider = provider
+		return nil
+	}
+}
+
+func withProviderFactory(factory func() (Provider, error)) EventStoreOption {
+	return func(es *EventStore) error {
+		if factory == nil {
+			return ErrNilProvider
+		}
+		es.providerMu.Lock()
+		defer es.providerMu.Unlock()
+		if es.provider != nil || es.providerFactory != nil {
+			return ErrProviderAlreadyConfigured
+		}
+		es.providerFactory = factory
+		return nil
+	}
+}
+
+func (es *EventStore) hasConfiguredProvider() bool {
+	es.providerMu.Lock()
+	defer es.providerMu.Unlock()
+	return es.provider != nil || es.providerFactory != nil
+}
+
+func (es *EventStore) providerForUse() (Provider, error) {
+	es.providerMu.Lock()
+	defer es.providerMu.Unlock()
+
+	if es.provider != nil {
+		return es.provider, nil
+	}
+	if es.providerFactory == nil {
+		return nil, ErrNoProvider
+	}
+
+	provider, err := es.providerFactory()
+	if err != nil {
+		return nil, err
+	}
+	if provider == nil {
+		return nil, ErrNilProvider
+	}
+	es.provider = provider
+	return provider, nil
+}
+
+func (es *EventStore) configuredProviderForConsume() (Provider, error) {
+	es.lifecycleMu.Lock()
+	defer es.lifecycleMu.Unlock()
+	if es.closed.Load() {
+		return nil, ErrEventStoreClosed
+	}
+	return es.providerForUse()
+}
+
+func (es *EventStore) closeConfiguredProvider() error {
+	es.providerMu.Lock()
+	provider := es.provider
+	es.provider = nil
+	es.providerFactory = nil
+	es.providerMu.Unlock()
+
+	if provider == nil {
+		return nil
+	}
+	return provider.Close()
+}
+
+// PublishToProvider publishes an event through the provider configured on
+// NewEventStore. Local Subscribe/Publish semantics are unchanged.
+func (es *EventStore) PublishToProvider(ctx context.Context, event Event) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !es.enterOperation() {
+		return ErrEventStoreClosed
+	}
+	defer es.activeOps.Done()
+
+	provider, err := es.providerForUse()
+	if err != nil {
+		return err
+	}
+	return provider.Publish(ctx, event)
 }
 
 // EventCodec serializes an Event for transport and reconstructs it on receipt.
@@ -126,14 +245,35 @@ func (c JSONCodec) Decode(encoded []byte) (Event, error) {
 	}, nil
 }
 
-// Consume receives remote events from provider and feeds them into the local
-// EventStore. A provider acknowledges an event only after the store accepts
+// Consume receives remote events and feeds them into the local EventStore.
+//
+// With no explicit provider argument, Consume uses the provider configured via
+// NewEventStore options. Passing one provider preserves the previous explicit
+// provider API. A provider acknowledges an event only after the store accepts
 // it. Handler errors continue to follow EventStore's normal error and DLQ
 // semantics.
-func (es *EventStore) Consume(ctx context.Context, provider Provider) error {
-	if provider == nil {
-		return ErrNilProvider
+func (es *EventStore) Consume(ctx context.Context, providers ...Provider) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+
+	var provider Provider
+	switch len(providers) {
+	case 0:
+		configured, err := es.configuredProviderForConsume()
+		if err != nil {
+			return err
+		}
+		provider = configured
+	case 1:
+		provider = providers[0]
+		if provider == nil {
+			return ErrNilProvider
+		}
+	default:
+		return ErrTooManyProviders
+	}
+
 	return provider.Consume(ctx, func(eventCtx context.Context, event Event) error {
 		if eventCtx == nil {
 			eventCtx = ctx
