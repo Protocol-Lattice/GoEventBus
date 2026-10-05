@@ -17,10 +17,10 @@ type KafkaProviderConfig struct {
 	Topic   string
 	Group   string
 
-	// Partition pins publishing/consumption to a partition when >= 0.
-	// Partition must remain -1 when Group is configured because Kafka assigns
-	// partitions to consumer-group members.
-	Partition int
+	// Partition pins publishing and non-group consumption to one partition.
+	// Leave nil to let Kafka select/assign partitions. Partition and Group are
+	// mutually exclusive for consumers because group membership owns assignment.
+	Partition *int
 
 	MinBytes int
 	MaxBytes int
@@ -35,7 +35,7 @@ type KafkaProvider struct {
 	reader *kafka.Reader
 
 	topic     string
-	partition int
+	partition *int
 	codec     EventCodec
 
 	closeOnce sync.Once
@@ -58,10 +58,10 @@ func NewKafkaProvider(config KafkaProviderConfig) (*KafkaProvider, error) {
 	if config.Topic == "" {
 		return nil, errors.New("goeventbus: Kafka topic must not be empty")
 	}
-	if config.Partition < -1 {
-		return nil, errors.New("goeventbus: Kafka partition must be -1 or greater")
+	if config.Partition != nil && *config.Partition < 0 {
+		return nil, errors.New("goeventbus: Kafka partition must be zero or greater")
 	}
-	if config.Group != "" && config.Partition >= 0 {
+	if config.Group != "" && config.Partition != nil {
 		return nil, errors.New("goeventbus: Kafka partition cannot be fixed when a consumer group is configured")
 	}
 	if config.MinBytes <= 0 {
@@ -77,10 +77,15 @@ func NewKafkaProvider(config KafkaProviderConfig) (*KafkaProvider, error) {
 		config.Codec = JSONCodec{}
 	}
 
+	var balancer kafka.Balancer = &kafka.Hash{}
+	if config.Partition != nil {
+		balancer = fixedKafkaPartitionBalancer(*config.Partition)
+	}
+
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(config.Brokers...),
 		Topic:        config.Topic,
-		Balancer:     &kafka.Hash{},
+		Balancer:     balancer,
 		RequiredAcks: kafka.RequireAll,
 		Async:        false,
 	}
@@ -94,8 +99,8 @@ func NewKafkaProvider(config KafkaProviderConfig) (*KafkaProvider, error) {
 		MaxWait:        config.MaxWait,
 		CommitInterval: 0,
 	}
-	if config.Group == "" && config.Partition >= 0 {
-		readerConfig.Partition = config.Partition
+	if config.Partition != nil {
+		readerConfig.Partition = *config.Partition
 	}
 
 	return &KafkaProvider{
@@ -107,8 +112,9 @@ func NewKafkaProvider(config KafkaProviderConfig) (*KafkaProvider, error) {
 	}, nil
 }
 
-// Publish writes one Kafka message. Projection is stored as the message key to
-// preserve per-projection ordering when the default hash balancer is used.
+// Publish writes one Kafka message. Projection is stored as the message key,
+// preserving per-projection ordering with the default hash balancer. A fixed
+// partition, when configured, overrides the balancer.
 func (p *KafkaProvider) Publish(ctx context.Context, e Event) error {
 	if p.closed.Load() {
 		return ErrProviderClosed
@@ -131,9 +137,6 @@ func (p *KafkaProvider) Publish(ctx context.Context, e Event) error {
 		Value: payload,
 		Time:  time.Now().UTC(),
 	}
-	if p.partition >= 0 {
-		msg.Partition = p.partition
-	}
 	if e.ID != "" {
 		msg.Headers = append(msg.Headers, kafka.Header{Key: "goeventbus-event-id", Value: []byte(e.ID)})
 	}
@@ -145,7 +148,8 @@ func (p *KafkaProvider) Publish(ctx context.Context, e Event) error {
 }
 
 // Consume fetches one message at a time and commits its offset only after the
-// EventConsumer returns nil. Failed handling leaves the offset uncommitted.
+// EventConsumer returns nil. Failed handling leaves the offset uncommitted for
+// redelivery according to Kafka consumer-group semantics.
 func (p *KafkaProvider) Consume(ctx context.Context, consumer EventConsumer) error {
 	if consumer == nil {
 		return ErrNilConsumer
@@ -192,6 +196,21 @@ func (p *KafkaProvider) Close() error {
 		p.closeErr = errors.Join(p.reader.Close(), p.writer.Close())
 	})
 	return p.closeErr
+}
+
+type fixedKafkaPartitionBalancer int
+
+func (b fixedKafkaPartitionBalancer) Balance(_ kafka.Message, partitions ...int) int {
+	want := int(b)
+	for _, partition := range partitions {
+		if partition == want {
+			return want
+		}
+	}
+	if len(partitions) == 0 {
+		return 0
+	}
+	return partitions[0]
 }
 
 var _ Provider = (*KafkaProvider)(nil)
