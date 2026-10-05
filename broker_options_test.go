@@ -24,22 +24,34 @@ func TestWithKafkaValidatesConfigurationLazily(t *testing.T) {
 }
 
 func TestKafkaRejectsFixedPartitionWithGroup(t *testing.T) {
+	partition := 0
 	_, err := NewKafkaProvider(KafkaProviderConfig{
 		Brokers:   []string{"localhost:9092"},
 		Topic:     "events",
 		Group:     "billing",
-		Partition: 0,
+		Partition: &partition,
 	})
 	if err == nil {
 		t.Fatal("expected group/partition validation error")
 	}
 }
 
+func TestKafkaGroupUsesZeroValueConfigWithoutPartitionConflict(t *testing.T) {
+	provider, err := NewKafkaProvider(KafkaProviderConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "events",
+		Group:   "billing",
+	})
+	if err != nil {
+		t.Fatalf("expected group config to be valid, got %v", err)
+	}
+	_ = provider.Close()
+}
+
 func TestKafkaRejectsNonStringProjectionBeforeNetwork(t *testing.T) {
 	provider, err := NewKafkaProvider(KafkaProviderConfig{
-		Brokers:   []string{"localhost:9092"},
-		Topic:     "events",
-		Partition: -1,
+		Brokers: []string{"localhost:9092"},
+		Topic:   "events",
 	})
 	if err != nil {
 		t.Fatal(err)
