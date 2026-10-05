@@ -5,7 +5,15 @@ go 1.23.0
 toolchain go1.23.7
 
 require (
+	cloud.google.com/go/pubsub v1.48.0
+	github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus v1.10.0
+	github.com/apache/pulsar-client-go v0.16.0
+	github.com/aws/aws-sdk-go-v2/service/sns v1.39.17
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.52.1
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/fasthttp/router v1.5.4
+	github.com/jackc/pgx/v5 v5.7.6
+	github.com/nsqio/go-nsq v1.1.0
 	github.com/nats-io/nats.go v1.39.1
 	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/redis/go-redis/v9 v9.18.0
