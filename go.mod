@@ -6,8 +6,10 @@ toolchain go1.23.7
 
 require (
 	github.com/fasthttp/router v1.5.4
+	github.com/nats-io/nats.go v1.39.1
 	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/redis/go-redis/v9 v9.18.0
+	github.com/segmentio/kafka-go v0.4.48
 	github.com/testcontainers/testcontainers-go v0.34.0
 	github.com/valyala/fasthttp v1.61.0
 )
