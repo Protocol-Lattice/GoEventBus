@@ -63,7 +63,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Lifecycle hooks** with `OnBefore`, `OnAfter`, and `OnError`.
 - **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
 - **Dead-letter queue** with replay support and panic recovery.
-- **Redis Streams and RabbitMQ EventStore options** for cross-process delivery.
+- **Redis Streams, RabbitMQ, NATS JetStream, and Kafka EventStore options** for cross-process delivery.
 - **Transactions** with local buffering, transport-aware commit, and optional Rules/Cache/Jev event selection.
 - **Scheduling** with absolute/relative timers and optional Rules/Cache/Jev event selection.
 - **Metrics** for published, processed, and failed events.
@@ -717,6 +717,50 @@ if err != nil {
 }
 fmt.Println("published decision:", decision.Choice)
 ```
+
+## NATS JetStream
+
+```go
+nc, err := nats.Connect(nats.DefaultURL)
+if err != nil {
+    log.Fatal(err)
+}
+
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithNATSJetStream(GoEventBus.NATSJetStreamProviderConfig{
+        Conn:          nc,
+        SubjectPrefix: "events.",
+        Subject:       "events.>",
+        Durable:       "billing",
+        Queue:         "billing-workers",
+    }),
+)
+```
+
+The injected NATS connection remains application-owned. JetStream messages use
+explicit acknowledgements; handler failures are NAKed for broker redelivery.
+
+## Apache Kafka
+
+```go
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithKafka(GoEventBus.KafkaProviderConfig{
+        Brokers: []string{"localhost:9092"},
+        Topic:   "events",
+        Group:   "billing",
+    }),
+)
+```
+
+Kafka consumer offsets are committed synchronously only after successful event
+handling. With the default hash balancer, the string projection is used as the
+message key, preserving ordering for a projection within a partition.
 
 Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when
 consumers need concrete payload types rather than generic JSON values.
