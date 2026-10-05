@@ -3,6 +3,8 @@ package GoEventBus
 import (
 	"errors"
 	"testing"
+
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 func TestWithNATSJetStreamRejectsNilConnectionLazily(t *testing.T) {
@@ -61,5 +63,56 @@ func TestKafkaRejectsNonStringProjectionBeforeNetwork(t *testing.T) {
 	err = provider.Publish(nil, Event{Projection: 123})
 	if !errors.Is(err, ErrStringProjection) {
 		t.Fatalf("expected ErrStringProjection, got %v", err)
+	}
+}
+
+
+func TestRemainingBrokerOptionsValidateLazily(t *testing.T) {
+	tests := []struct {
+		name string
+		opt  EventStoreOption
+		want string
+	}{
+		{"sqs", WithSQS(SQSProviderConfig{}), "goeventbus: SQS client must not be nil"},
+		{"sns", WithSNS(SNSProviderConfig{}), "goeventbus: SNS client must not be nil"},
+		{"gcp-pubsub", WithGCPPubSub(GCPPubSubProviderConfig{}), "goeventbus: GCP Pub/Sub client must not be nil"},
+		{"azure-service-bus", WithAzureServiceBus(AzureServiceBusProviderConfig{}), "goeventbus: Azure Service Bus client must not be nil"},
+		{"pulsar", WithPulsar(PulsarProviderConfig{}), "goeventbus: Pulsar client must not be nil"},
+		{"mqtt", WithMQTT(MQTTProviderConfig{}), "goeventbus: MQTT client or client options are required"},
+		{"postgres", WithPostgres(PostgresProviderConfig{}), "goeventbus: PostgreSQL pool or connection string is required"},
+		{"nsq", WithNSQ(NSQProviderConfig{}), "goeventbus: NSQ nsqd address must not be empty"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var dispatcher Dispatcher
+			store := NewEventStore(&dispatcher, 8, Block, tt.opt)
+			err := store.PublishToProvider(nil, Event{Projection: "order.created"})
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestPostgresRejectsUnsafeTableName(t *testing.T) {
+	_, err := NewPostgresProvider(PostgresProviderConfig{
+		ConnectionString: "postgres://localhost/test",
+		Table:            "events;drop table users",
+	})
+	if err == nil {
+		t.Fatal("expected invalid table name error")
+	}
+}
+
+func TestMQTTRejectsInvalidQoS(t *testing.T) {
+	_, err := NewMQTTProvider(MQTTProviderConfig{
+		Client: nil,
+		Options: new(mqtt.ClientOptions),
+		Topic: "events",
+		QoS: 3,
+	})
+	if err == nil {
+		t.Fatal("expected invalid MQTT QoS error")
 	}
 }
