@@ -63,7 +63,7 @@ That gives you intelligent routing without putting an LLM call in the `Publish()
 - **Lifecycle hooks** with `OnBefore`, `OnAfter`, and `OnError`.
 - **Back-pressure policies**: `DropOldest`, `Block`, or `ReturnError`.
 - **Dead-letter queue** with replay support and panic recovery.
-- **Redis Streams, RabbitMQ, NATS JetStream, and Kafka EventStore options** for cross-process delivery.
+- **12 official EventStore broker options**: Redis Streams, RabbitMQ, NATS JetStream, Kafka, SQS, SNS, GCP Pub/Sub, Azure Service Bus, Pulsar, MQTT, PostgreSQL, and NSQ.
 - **Transactions** with local buffering, transport-aware commit, and optional Rules/Cache/Jev event selection.
 - **Scheduling** with absolute/relative timers and optional Rules/Cache/Jev event selection.
 - **Metrics** for published, processed, and failed events.
@@ -761,6 +761,137 @@ store := GoEventBus.NewEventStore(
 Kafka consumer offsets are committed synchronously only after successful event
 handling. With the default hash balancer, the string projection is used as the
 message key, preserving ordering for a projection within a partition.
+
+## Remaining official brokers
+
+All remaining official transports use the same store-first API:
+
+```go
+store := GoEventBus.NewEventStore(
+    &dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithSQS(sqsConfig), // swap for any provider below
+)
+```
+
+| Broker | EventStore option | Consume semantics |
+|---|---|---|
+| AWS SQS | `WithSQS` | long-poll; delete only after successful handling |
+| AWS SNS | `WithSNS` | publish through SNS; consumption delegates to a real subscriber transport such as SQS |
+| Google Cloud Pub/Sub | `WithGCPPubSub` | Ack on success, Nack on decode/handler failure |
+| Azure Service Bus | `WithAzureServiceBus` | PeekLock; Complete on success, Abandon on failure |
+| Apache Pulsar | `WithPulsar` | durable subscription; Ack on success, Nack on failure |
+| MQTT | `WithMQTT` | QoS 0/1/2; broker ACK behavior follows MQTT/Paho semantics |
+| PostgreSQL | `WithPostgres` | persistent table + `FOR UPDATE SKIP LOCKED`; delete on success, delayed retry on failure |
+| NSQ | `WithNSQ` | channel-based consumption; handler errors are requeued by go-nsq |
+
+Broker-backed events still require string projections, custom `EventCodec`
+implementations are supported by every provider, and `Drain` / `Close`
+closes provider-owned resources. Injected cloud clients/connections remain
+application-owned.
+
+### AWS SQS
+
+```go
+store := GoEventBus.NewEventStore(
+    &dispatcher, 1024, GoEventBus.Block,
+    GoEventBus.WithSQS(GoEventBus.SQSProviderConfig{
+        Client:   sqsClient,
+        QueueURL: queueURL,
+    }),
+)
+```
+
+FIFO queues can set `FIFO`, `MessageGroupID`, and an optional
+`MessageDeduplicationID` callback.
+
+### AWS SNS
+
+```go
+sqsSubscriber, _ := GoEventBus.NewSQSProvider(sqsConfig)
+
+store := GoEventBus.NewEventStore(
+    &dispatcher, 1024, GoEventBus.Block,
+    GoEventBus.WithSNS(GoEventBus.SNSProviderConfig{
+        Client:     snsClient,
+        TopicARN:   topicARN,
+        Subscriber: sqsSubscriber,
+    }),
+)
+```
+
+SNS is not modeled as a queue. `Consume` requires an actual subscriber
+transport such as SQS, matching SNS delivery semantics.
+
+### Google Cloud Pub/Sub
+
+```go
+GoEventBus.WithGCPPubSub(GoEventBus.GCPPubSubProviderConfig{
+    Client:         pubsubClient,
+    Topic:          "events",
+    Subscription:   "billing",
+    EnableOrdering: true,
+})
+```
+
+### Azure Service Bus
+
+```go
+GoEventBus.WithAzureServiceBus(GoEventBus.AzureServiceBusProviderConfig{
+    Client: sbClient,
+    Queue:  "billing",
+})
+```
+
+For topic subscriptions, set `Topic` and `Subscription` instead of `Queue`.
+
+### Apache Pulsar
+
+```go
+GoEventBus.WithPulsar(GoEventBus.PulsarProviderConfig{
+    Client:       pulsarClient,
+    Topic:        "persistent://public/default/events",
+    Subscription: "billing",
+})
+```
+
+### MQTT
+
+```go
+GoEventBus.WithMQTT(GoEventBus.MQTTProviderConfig{
+    Options:     mqttOptions,
+    TopicPrefix: "events/",
+    QoS:         1,
+})
+```
+
+An injected MQTT client remains caller-owned. When `Options` is supplied,
+GoEventBus creates and owns the client. Automatic reconnect and persistent
+sessions are configured through Paho's `ClientOptions`.
+
+### PostgreSQL
+
+```go
+GoEventBus.WithPostgres(GoEventBus.PostgresProviderConfig{
+    ConnectionString: os.Getenv("DATABASE_URL"),
+    Table:            "goeventbus_events",
+})
+```
+
+The PostgreSQL provider uses a durable table-backed queue. Consumers claim one
+row with `FOR UPDATE SKIP LOCKED`; successful processing deletes the row,
+while failures increment the attempt count and delay the next delivery.
+
+### NSQ
+
+```go
+GoEventBus.WithNSQ(GoEventBus.NSQProviderConfig{
+    NSQDAddress: "127.0.0.1:4150",
+    Topic:       "events",
+    Channel:     "billing",
+})
+```
 
 Providers use `JSONCodec` by default. Supply a custom `DecodePayload` when
 consumers need concrete payload types rather than generic JSON values.
