@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="GoEventBus documentation: installation, Go examples, handlers, rules, cache, Jev routing, Redis Streams, RabbitMQ, and API reference. Search every guide and code example.">
+  <meta name="description" content="GoEventBus documentation: installation, handlers, rules, cache, Jev routing, and 12 official broker providers including Redis, RabbitMQ, NATS, Kafka, SQS, SNS, GCP Pub/Sub, Azure Service Bus, Pulsar, MQTT, PostgreSQL, and NSQ.">
   <meta name="theme-color" content="#f8f8f6">
   <title>Documentation — GoEventBus</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23181818'/%3E%3Cpath d='M8 7h8v6h8v12h-8v-6H8z' fill='none' stroke='%23f3a7c7' stroke-width='3'/%3E%3C/svg%3E">
@@ -61,7 +61,7 @@
 </div>
 <div class="doc-nav-group"><p class="doc-nav-label">Routing &amp; integrations</p>
 <a href="#intelligent-event-routing">Rules, cache &amp; Jev</a>
-<a href="#external-providers">Redis &amp; RabbitMQ</a>
+<a href="#external-providers">12 broker providers</a>
 </div>
 <div class="doc-nav-group"><p class="doc-nav-label">Operations</p>
 <a href="#dead-letter-queue">Dead letter queue</a>
@@ -88,7 +88,7 @@
 <h1 tabindex="-1">Documentation<a class="heading-anchor" href="#overview" aria-label="Link to Documentation">#</a></h1>
 <p class="doc-lead">A high-performance event bus for Go with deterministic rules, cached decisions, and optional Jev-powered event routing.</p>
 <div class="doc-start-links"><a href="#installation"><span class="mono">01 / SET UP</span><strong>Install GoEventBus</strong><span>One package. Go 1.23+.</span></a><a href="#quick-start"><span class="mono">02 / BUILD</span><strong>Run your first event</strong><span>Register, enqueue, dispatch.</span></a></div>
-<p>GoEventBus combines a bounded MPMC in-memory event bus with fan-out, ordered and batch handlers, middleware, lifecycle hooks, dead-letter handling, Redis Streams, RabbitMQ, and an optional decision layer for choosing which event type should execute.</p>
+<p>GoEventBus combines a bounded MPMC in-memory event bus with fan-out, ordered and batch handlers, middleware, lifecycle hooks, dead-letter handling, <strong>12 official broker providers</strong>, and an optional decision layer for choosing which event type should execute.</p>
 <aside class="doc-note"><strong>Start with the direct path.</strong><p><code>Subscribe</code> enqueues an event. <code>Publish</code> dispatches pending events to your handlers. The rules, cache, and Jev decision layer is optional.</p></aside>
 <div class="doc-flow" aria-label="Register handlers, enqueue with Subscribe, dispatch with Publish"><span><small>01</small>Register</span><span><small>02</small>Subscribe</span><span><small>03</small>Publish</span></div>
 </section>
@@ -208,7 +208,7 @@ dispatcher.Register(
 <li><strong>Lifecycle hooks</strong> with <code>OnBefore</code>, <code>OnAfter</code>, and <code>OnError</code>.</li>
 <li><strong>Back-pressure policies</strong>: <code>DropOldest</code>, <code>Block</code>, or <code>ReturnError</code>.</li>
 <li><strong>Dead-letter queue</strong> with replay support and panic recovery.</li>
-<li><strong>Redis Streams and RabbitMQ providers</strong> for cross-process delivery.</li>
+<li><strong>12 official broker providers</strong>: Redis Streams, RabbitMQ, NATS JetStream, Kafka, AWS SQS, AWS SNS, Google Cloud Pub/Sub, Azure Service Bus, Apache Pulsar, MQTT, PostgreSQL, and NSQ.</li>
 <li><strong>Transactions</strong> with local buffering and transport-aware commit to local handlers or the configured broker.</li>
 <li><strong>Scheduling</strong> with absolute and relative timers.</li>
 <li><strong>Metrics</strong> for published, processed, and failed events.</li>
@@ -479,111 +479,116 @@ store.Publish()</code></pre></div>
 <p>when cache failures should fail the routing call instead.</p>
 </section>
 </section>
-<section class="doc-section" id="external-providers" data-doc-section data-search-section data-title="Redis &amp; RabbitMQ" data-category="Routing &amp; integrations">
+<section class="doc-section" id="external-providers" data-doc-section data-search-section data-title="External providers" data-category="Routing &amp; integrations">
 <p class="doc-section-label mono">Routing &amp; integrations</p>
-<h2 tabindex="-1">Redis &amp; RabbitMQ<a class="heading-anchor" href="#external-providers" aria-label="Link to Redis &amp; RabbitMQ">#</a></h2>
-<p>Redis Streams and RabbitMQ are configured directly on <code>NewEventStore</code>. The store owns the provider lifecycle, and broker construction is lazy until the first publish or consume operation.</p>
-<p>When a broker is configured, <code>DecideAndSubscribe</code> selects the event type and publishes the selected event to that broker. Without a broker option, the same method keeps its normal local enqueue behavior.</p>
-<aside class="doc-note"><strong>Broker projections must be strings.</strong><p>Redis Streams and RabbitMQ use the selected projection as the broker routing name, so broker-backed candidates must use string projections.</p></aside>
-<section class="doc-subsection" id="redis-streams" data-search-section data-title="Redis Streams" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">Redis Streams<a class="heading-anchor" href="#redis-streams" aria-label="Link to Redis Streams">#</a></h3>
-<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">rdb := redis.NewClient(&amp;redis.Options{
-    Addr: &quot;localhost:6379&quot;,
-})
-
-store := GoEventBus.NewEventStore(
-    &amp;dispatcher,
-    1024,
-    GoEventBus.Block,
-    GoEventBus.WithRedis(GoEventBus.RedisProviderConfig{
-        Client:   rdb,
-        Stream:   &quot;events&quot;,
-        Group:    &quot;billing&quot;,
-        Consumer: &quot;billing-1&quot;,
-        StartID:  &quot;0&quot;,
-    }),
-)
-defer store.Close(context.Background())
-
-go func() {
-    if err := store.Consume(ctx); err != nil &amp;&amp;
-        !errors.Is(err, context.Canceled) &amp;&amp;
-        !errors.Is(err, GoEventBus.ErrProviderClosed) {
-        log.Println(err)
-    }
-}()
-
-brokerCandidates := []GoEventBus.EventCandidate{
-    {
-        Key:         &quot;order_created&quot;,
-        Projection:  &quot;order.created&quot;,
-        Description: &quot;A new order should be created&quot;,
-    },
-}
-
-decision, err := store.DecideAndSubscribe(
-    ctx,
-    selector,
-    state,
-    GoEventBus.Event{
-        ID:   &quot;evt-redis-1&quot;,
-        Data: order,
-    },
-    brokerCandidates,
-)
-if err != nil {
-    log.Fatal(err)
-}
-
-fmt.Println(&quot;published decision:&quot;, decision.Choice)</code></pre></div>
-<p>If the projection is already known and no decision step is needed, use <code>store.PublishToProvider(ctx, event)</code> instead.</p>
-</section>
-<section class="doc-subsection" id="rabbitmq" data-search-section data-title="RabbitMQ" data-category="Redis &amp; RabbitMQ"><h3 tabindex="-1">RabbitMQ<a class="heading-anchor" href="#rabbitmq" aria-label="Link to RabbitMQ">#</a></h3>
+<h2 tabindex="-1">External providers<a class="heading-anchor" href="#external-providers" aria-label="Link to External providers">#</a></h2>
+<p>GoEventBus exposes one application-facing broker API across twelve official transports. Configure exactly one provider on <code>NewEventStore</code>, then use the same <code>DecideAndSubscribe</code>, <code>PublishToProvider</code>, <code>Consume</code>, and shutdown lifecycle regardless of the broker.</p>
 <div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
     &amp;dispatcher,
     1024,
     GoEventBus.Block,
-    GoEventBus.WithRabbitMQ(GoEventBus.RabbitMQProviderConfig{
-        URL:        &quot;amqp://guest:guest@localhost:5672/&quot;,
-        Exchange:   &quot;events&quot;,
-        Queue:      &quot;billing&quot;,
-        BindingKey: &quot;order.*&quot;,
-        Consumer:   &quot;billing-1&quot;,
+    GoEventBus.WithSQS(sqsConfig), // swap only this option
+)</code></pre></div>
+<aside class="doc-note"><strong>Broker routing requires string projections.</strong><p>Local dispatch can use any comparable projection. Remote providers require a non-empty string because the projection becomes the stable topic, subject, key, or routing name.</p></aside>
+<p>Every official provider supports the shared <code>EventCodec</code> abstraction. <code>JSONCodec</code> is the default.</p>
+
+<section class="doc-subsection" id="broker-capability-matrix" data-search-section data-title="Broker capability matrix" data-category="External providers"><h3 tabindex="-1">Broker capability matrix<a class="heading-anchor" href="#broker-capability-matrix" aria-label="Link to Broker capability matrix">#</a></h3>
+<div class="doc-table" role="region" aria-label="Broker capability matrix" tabindex="0"><table><thead><tr><th scope="col">Broker</th><th scope="col">Option</th><th scope="col">Success acknowledgement</th><th scope="col">Failure / retry</th><th scope="col">Ordering / grouping</th></tr></thead><tbody>
+<tr><td>Redis Streams</td><td><code>WithRedis</code></td><td><code>XACK</code> after handler success</td><td>Pending entry remains for retry</td><td>Consumer groups; stream order</td></tr>
+<tr><td>RabbitMQ</td><td><code>WithRabbitMQ</code></td><td>Manual Ack after success</td><td>Nack + requeue</td><td>Topic routing; queue ordering</td></tr>
+<tr><td>NATS JetStream</td><td><code>WithNATSJetStream</code></td><td>Explicit Ack</td><td>Nak for redelivery</td><td>Durable consumers; queue groups</td></tr>
+<tr><td>Apache Kafka</td><td><code>WithKafka</code></td><td>Offset commit after success</td><td>Uncommitted offset is redelivered</td><td>Partitions; consumer groups</td></tr>
+<tr><td>AWS SQS</td><td><code>WithSQS</code></td><td>Delete after success</td><td>Visibility timeout makes failed messages visible again</td><td>Standard or FIFO queues</td></tr>
+<tr><td>AWS SNS</td><td><code>WithSNS</code></td><td>Publish acceptance</td><td>Subscriber transport owns retry</td><td>Topics; FIFO when configured</td></tr>
+<tr><td>GCP Pub/Sub</td><td><code>WithGCPPubSub</code></td><td>Ack after success</td><td>Nack on decode/handler failure</td><td>Subscriptions; optional ordering keys</td></tr>
+<tr><td>Azure Service Bus</td><td><code>WithAzureServiceBus</code></td><td>Complete in PeekLock mode</td><td>Abandon on failure</td><td>Queues or topic subscriptions</td></tr>
+<tr><td>Apache Pulsar</td><td><code>WithPulsar</code></td><td>Ack after success</td><td>Nack for redelivery</td><td>Shared / Exclusive / Failover / KeyShared</td></tr>
+<tr><td>MQTT</td><td><code>WithMQTT</code></td><td>Protocol QoS acknowledgement</td><td>Handler errors cannot be translated to broker Nack after callback delivery</td><td>Topics; QoS 0/1/2</td></tr>
+<tr><td>PostgreSQL</td><td><code>WithPostgres</code></td><td>Delete row after success</td><td>Attempts increment + delayed availability</td><td>Persistent table; <code>SKIP LOCKED</code></td></tr>
+<tr><td>NSQ</td><td><code>WithNSQ</code></td><td>Finish after handler success</td><td>Handler error triggers requeue</td><td>Topics + channels</td></tr>
+</tbody></table></div>
+</section>
+
+<section class="doc-subsection" id="aws-sqs" data-search-section data-title="AWS SQS" data-category="External providers"><h3 tabindex="-1">AWS SQS<a class="heading-anchor" href="#aws-sqs" aria-label="Link to AWS SQS">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher, 1024, GoEventBus.Block,
+    GoEventBus.WithSQS(GoEventBus.SQSProviderConfig{
+        Client:   sqsClient,
+        QueueURL: queueURL,
     }),
-)
-defer store.Close(context.Background())
+)</code></pre></div>
+<p>SQS uses long polling. Messages are deleted only after the EventStore accepts and processes them successfully. FIFO queues can set <code>FIFO</code>, <code>MessageGroupID</code>, and <code>MessageDeduplicationID</code>.</p>
+</section>
 
-go func() {
-    if err := store.Consume(ctx); err != nil &amp;&amp;
-        !errors.Is(err, context.Canceled) &amp;&amp;
-        !errors.Is(err, GoEventBus.ErrProviderClosed) {
-        log.Println(err)
-    }
-}()
+<section class="doc-subsection" id="aws-sns" data-search-section data-title="AWS SNS" data-category="External providers"><h3 tabindex="-1">AWS SNS<a class="heading-anchor" href="#aws-sns" aria-label="Link to AWS SNS">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">sqsSubscriber, _ := GoEventBus.NewSQSProvider(sqsConfig)
 
-brokerCandidates := []GoEventBus.EventCandidate{
-    {
-        Key:         &quot;order_created&quot;,
-        Projection:  &quot;order.created&quot;,
-        Description: &quot;A new order should be created&quot;,
-    },
-}
+store := GoEventBus.NewEventStore(
+    &amp;dispatcher, 1024, GoEventBus.Block,
+    GoEventBus.WithSNS(GoEventBus.SNSProviderConfig{
+        Client:     snsClient,
+        TopicARN:   topicARN,
+        Subscriber: sqsSubscriber,
+    }),
+)</code></pre></div>
+<p>SNS is publish-oriented, not a queue. <code>Consume</code> therefore delegates to a supported subscriber transport such as SQS instead of inventing queue semantics.</p>
+</section>
 
-decision, err := store.DecideAndSubscribe(
-    ctx,
-    selector,
-    state,
-    GoEventBus.Event{
-        ID:   &quot;evt-rabbit-1&quot;,
-        Data: order,
-    },
-    brokerCandidates,
-)
-if err != nil {
-    log.Fatal(err)
-}
+<section class="doc-subsection" id="gcp-pubsub" data-search-section data-title="Google Cloud Pub/Sub" data-category="External providers"><h3 tabindex="-1">Google Cloud Pub/Sub<a class="heading-anchor" href="#gcp-pubsub" aria-label="Link to Google Cloud Pub/Sub">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithGCPPubSub(GoEventBus.GCPPubSubProviderConfig{
+    Client:         pubsubClient,
+    Topic:          "events",
+    Subscription:   "billing",
+    EnableOrdering: true,
+})</code></pre></div>
+<p>Successful handling calls Ack. Decode or handler failures call Nack. When ordering is enabled, the projection is the default ordering key.</p>
+</section>
 
-fmt.Println(&quot;published decision:&quot;, decision.Choice)</code></pre></div>
-<p>Providers use <code>JSONCodec</code> by default. Supply a custom <code>DecodePayload</code> when consumers need concrete payload types rather than generic JSON values.</p>
+<section class="doc-subsection" id="azure-service-bus" data-search-section data-title="Azure Service Bus" data-category="External providers"><h3 tabindex="-1">Azure Service Bus<a class="heading-anchor" href="#azure-service-bus" aria-label="Link to Azure Service Bus">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithAzureServiceBus(GoEventBus.AzureServiceBusProviderConfig{
+    Client: sbClient,
+    Queue:  "billing",
+})</code></pre></div>
+<p>Queue consumers use PeekLock processing: successful messages are completed, while failures are abandoned for retry. For pub/sub, configure <code>Topic</code> and <code>Subscription</code> instead of <code>Queue</code>.</p>
+</section>
+
+<section class="doc-subsection" id="apache-pulsar" data-search-section data-title="Apache Pulsar" data-category="External providers"><h3 tabindex="-1">Apache Pulsar<a class="heading-anchor" href="#apache-pulsar" aria-label="Link to Apache Pulsar">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithPulsar(GoEventBus.PulsarProviderConfig{
+    Client:       pulsarClient,
+    Topic:        "persistent://public/default/events",
+    Subscription: "billing",
+})</code></pre></div>
+<p>The default subscription type is Shared. Configure <code>SubscriptionType</code> for Exclusive, Failover, or KeyShared behavior. Handler failures are Nacked for redelivery.</p>
+</section>
+
+<section class="doc-subsection" id="mqtt" data-search-section data-title="MQTT" data-category="External providers"><h3 tabindex="-1">MQTT<a class="heading-anchor" href="#mqtt" aria-label="Link to MQTT">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithMQTT(GoEventBus.MQTTProviderConfig{
+    Options:     mqttOptions,
+    TopicPrefix: "events/",
+    QoS:         1,
+})</code></pre></div>
+<p>QoS 0, 1, and 2 are supported. Automatic reconnect and persistent-session behavior are configured with Paho client options. Injected clients remain caller-owned; clients created from <code>Options</code> are owned by the provider.</p>
+</section>
+
+<section class="doc-subsection" id="postgresql" data-search-section data-title="PostgreSQL" data-category="External providers"><h3 tabindex="-1">PostgreSQL<a class="heading-anchor" href="#postgresql" aria-label="Link to PostgreSQL">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithPostgres(GoEventBus.PostgresProviderConfig{
+    ConnectionString: os.Getenv("DATABASE_URL"),
+    Table:            "goeventbus_events",
+})</code></pre></div>
+<p>The PostgreSQL provider implements a persistent table-backed queue. Consumers claim rows with <code>FOR UPDATE SKIP LOCKED</code>; success deletes the row and failure increments attempts and moves <code>available_at</code> forward for retry. An injected pool remains caller-owned.</p>
+</section>
+
+<section class="doc-subsection" id="nsq" data-search-section data-title="NSQ" data-category="External providers"><h3 tabindex="-1">NSQ<a class="heading-anchor" href="#nsq" aria-label="Link to NSQ">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">GoEventBus.WithNSQ(GoEventBus.NSQProviderConfig{
+    NSQDAddress: "127.0.0.1:4150",
+    Topic:       "events",
+    Channel:     "billing",
+})</code></pre></div>
+<p>NSQ uses topics and channels. The provider returns handler errors to <code>go-nsq</code>, allowing the client to requeue failed messages according to NSQ retry behavior.</p>
+</section>
+
+<section class="doc-subsection" id="existing-brokers" data-search-section data-title="Redis, RabbitMQ, NATS, and Kafka" data-category="External providers"><h3 tabindex="-1">Redis, RabbitMQ, NATS, and Kafka<a class="heading-anchor" href="#existing-brokers" aria-label="Link to Redis RabbitMQ NATS and Kafka">#</a></h3>
+<p>The existing <code>WithRedis</code>, <code>WithRabbitMQ</code>, <code>WithNATSJetStream</code>, and <code>WithKafka</code> options use the same EventStore-first API and lifecycle. This means application code can swap transports without changing routing or execution code.</p>
 </section>
 </section>
 <section class="doc-section" id="dead-letter-queue" data-doc-section data-search-section data-title="Dead letter queue" data-category="Operations">
@@ -671,7 +676,7 @@ if err := tx.Commit(ctx); err != nil {
 }</code></pre></div>
 <div class="doc-flow" aria-label="Rules cache Jev decision transaction commit"><span><small>01</small>Rules / Cache / Jev</span><span><small>02</small>DecideAndPublish</span><span><small>03</small>Transaction buffer</span><span><small>04</small>Commit</span></div>
 <p><code>DecideAndPublish</code> resolves the event projection immediately and buffers only the selected event. Routing failures do not mutate the transaction, and <code>Rollback</code> discards intelligently selected events just like direct events.</p>
-<aside class="doc-note"><strong>Commit follows the EventStore transport.</strong><p>Transactions always buffer events locally until <code>Commit</code>. On a normal local store, commit executes buffered regular handlers synchronously. With <code>WithRedis(...)</code>, <code>WithRabbitMQ(...)</code>, or <code>WithProvider(...)</code>, commit publishes the buffered events to that provider instead. Local handlers run only when those broker events are consumed back through <code>store.Consume(ctx)</code>.</p></aside>
+<aside class="doc-note"><strong>Commit follows the EventStore transport.</strong><p>Transactions always buffer events locally until <code>Commit</code>. On a normal local store, commit executes buffered regular handlers synchronously. With any official broker option—<code>WithRedis</code>, <code>WithRabbitMQ</code>, <code>WithNATSJetStream</code>, <code>WithKafka</code>, <code>WithSQS</code>, <code>WithSNS</code>, <code>WithGCPPubSub</code>, <code>WithAzureServiceBus</code>, <code>WithPulsar</code>, <code>WithMQTT</code>, <code>WithPostgres</code>, <code>WithNSQ</code>—or <code>WithProvider(...)</code>, commit publishes buffered events through that provider instead. Local handlers run only when those broker events are consumed back through <code>store.Consume(ctx)</code>.</p></aside>
 </section>
 <p>Local <code>Commit</code> stops at the first handler error. Broker-backed <code>Commit</code> publishes events in transaction order, stops at the first provider error, and removes only the prefix already confirmed by the provider. Retrying the transaction therefore starts from the first unpublished event instead of publishing the confirmed prefix again.</p>
 <p>Transactions are not database-style atomic transactions: handler side effects or broker publishes that already succeeded cannot be undone.</p>
