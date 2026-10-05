@@ -587,8 +587,70 @@ store := GoEventBus.NewEventStore(
 <p>NSQ uses topics and channels. The provider returns handler errors to <code>go-nsq</code>, allowing the client to requeue failed messages according to NSQ retry behavior.</p>
 </section>
 
-<section class="doc-subsection" id="existing-brokers" data-search-section data-title="Redis, RabbitMQ, NATS, and Kafka" data-category="External providers"><h3 tabindex="-1">Redis, RabbitMQ, NATS, and Kafka<a class="heading-anchor" href="#existing-brokers" aria-label="Link to Redis RabbitMQ NATS and Kafka">#</a></h3>
-<p>The existing <code>WithRedis</code>, <code>WithRabbitMQ</code>, <code>WithNATSJetStream</code>, and <code>WithKafka</code> options use the same EventStore-first API and lifecycle. This means application code can swap transports without changing routing or execution code.</p>
+<section class="doc-subsection" id="redis-streams" data-search-section data-title="Redis Streams" data-category="External providers"><h3 tabindex="-1">Redis Streams<a class="heading-anchor" href="#redis-streams" aria-label="Link to Redis Streams">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRedis(GoEventBus.RedisProviderConfig{
+        Client:   redisClient,
+        Stream:   "events",
+        Group:    "billing",
+        Consumer: "billing-1",
+        StartID:  "0",
+    }),
+)</code></pre></div>
+<p>Redis Streams uses consumer groups. Messages are acknowledged with <code>XACK</code> only after successful handling. Failed messages remain pending so the same consumer can retry them on a later consume cycle.</p>
+<p>The injected Redis client remains application-owned and is not closed by the provider. Stream retention can be controlled with <code>MaxLen</code>, and <code>Block</code> / <code>Count</code> tune read behavior.</p>
+</section>
+
+<section class="doc-subsection" id="rabbitmq" data-search-section data-title="RabbitMQ" data-category="External providers"><h3 tabindex="-1">RabbitMQ<a class="heading-anchor" href="#rabbitmq" aria-label="Link to RabbitMQ">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithRabbitMQ(GoEventBus.RabbitMQProviderConfig{
+        URL:        "amqp://guest:guest@localhost:5672/",
+        Exchange:   "events",
+        Queue:      "billing",
+        BindingKey: "order.*",
+        Consumer:   "billing-1",
+    }),
+)</code></pre></div>
+<p>RabbitMQ publishes to a durable topic exchange and waits for publisher confirms. Consumers use manual acknowledgements: successful processing calls Ack, while decode or handler failures Nack and requeue the delivery.</p>
+<p>The provider owns its AMQP connection and publisher channel. <code>PrefetchCount</code> controls the number of unacknowledged deliveries per consumer.</p>
+</section>
+
+<section class="doc-subsection" id="nats-jetstream" data-search-section data-title="NATS JetStream" data-category="External providers"><h3 tabindex="-1">NATS JetStream<a class="heading-anchor" href="#nats-jetstream" aria-label="Link to NATS JetStream">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithNATSJetStream(GoEventBus.NATSJetStreamProviderConfig{
+        Conn:          nc,
+        SubjectPrefix: "events.",
+        Subject:       "events.>",
+        Durable:       "billing",
+        Queue:         "billing-workers",
+    }),
+)</code></pre></div>
+<p>JetStream publishes each event to <code>SubjectPrefix + Projection</code>. Durable consumers and queue groups are supported. Messages use explicit acknowledgements: Ack after successful handling and Nak after decode or handler failure for redelivery.</p>
+<p>The injected NATS connection remains application-owned. GoEventBus closes only the subscription it creates.</p>
+</section>
+
+<section class="doc-subsection" id="apache-kafka" data-search-section data-title="Apache Kafka" data-category="External providers"><h3 tabindex="-1">Apache Kafka<a class="heading-anchor" href="#apache-kafka" aria-label="Link to Apache Kafka">#</a></h3>
+<div class="doc-code"><div class="doc-code-toolbar"><span>Go</span><button class="doc-copy" type="button" hidden>Copy code</button></div><pre tabindex="0" aria-label="Go example"><code data-language="go">store := GoEventBus.NewEventStore(
+    &amp;dispatcher,
+    1024,
+    GoEventBus.Block,
+    GoEventBus.WithKafka(GoEventBus.KafkaProviderConfig{
+        Brokers: []string{"localhost:9092"},
+        Topic:   "events",
+        Group:   "billing",
+    }),
+)</code></pre></div>
+<p>Kafka uses the event projection as the default message key, so events with the same projection stay ordered within a partition. Consumer groups are supported, and offsets are committed synchronously only after successful event handling.</p>
+<p>Handler or decode failures leave the offset uncommitted for redelivery according to Kafka consumer-group semantics. An optional fixed partition can be used when no consumer group is configured.</p>
 </section>
 </section>
 <section class="doc-section" id="dead-letter-queue" data-doc-section data-search-section data-title="Dead letter queue" data-category="Operations">
